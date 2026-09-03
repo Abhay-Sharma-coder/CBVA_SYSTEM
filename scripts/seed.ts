@@ -27,6 +27,7 @@ import { fromZonedTime } from "date-fns-tz";
 import * as schema from "../src/lib/db/schema";
 import { makeRng, type Rng } from "../src/lib/seed-data/rng";
 import { HOLIDAYS } from "../src/lib/seed-data/holidays";
+import { DEFAULT_OFFICE_HOURS } from "../src/lib/settings";
 import { floorplanSeatAnchors } from "../src/lib/floorplan";
 import { FIRST_NAMES, LAST_NAMES } from "../src/lib/seed-data/names";
 import {
@@ -40,7 +41,7 @@ import {
   seatCodes,
   seatTypeForBay,
 } from "../src/lib/seed-data/inventory";
-import { DEFAULT_SLOT_DEFINITIONS } from "../src/lib/slots";
+import { DEFAULT_SLOT_DEFINITIONS, deriveSlotBounds } from "../src/lib/slots";
 
 /** Fixed namespace: same natural key always yields the same uuid. */
 const NS = "6f0a1c2e-8b3d-4e5a-9f10-2b7c4d5e6a8b";
@@ -82,12 +83,13 @@ function isWorkingDay(d: Date): boolean {
   return dow >= 1 && dow <= 5 && !holidaySet.has(iso(d));
 }
 
-function slotBounds(date: string, slot: "AM" | "PM") {
-  const def = DEFAULT_SLOT_DEFINITIONS[slot];
-  return {
-    startsAt: fromZonedTime(`${date}T${def.start}:00`, TZ),
-    endsAt: fromZonedTime(`${date}T${def.end}:00`, TZ),
-  };
+/**
+ * ADR-007 says exactly one function computes starts_at/ends_at. The seed used
+ * to carry a private second copy of the derivation; it now calls the real one,
+ * so a slot-boundary change moves the seeded history with everything else.
+ */
+function slotBounds(date: string, slot: string) {
+  return deriveSlotBounds(date, slot, DEFAULT_SLOT_DEFINITIONS, TZ);
 }
 
 /**
@@ -263,9 +265,12 @@ async function main() {
     .values({
       id: id("settings"),
       bookingWindowDays: 14,
+      bookingWindowWorkingDays: 5,
       slotDefinitions: DEFAULT_SLOT_DEFINITIONS,
       autoReleaseMinutes: 120,
       cutoffMinutes: 60,
+      checkInOpensMinutesBefore: 30,
+      officeHours: DEFAULT_OFFICE_HOURS,
       timezone: TZ,
       demoOffsetSeconds: 0,
     })
@@ -273,10 +278,15 @@ async function main() {
       target: schema.settings.id,
       set: {
         bookingWindowDays: 14,
+        bookingWindowWorkingDays: 5,
         slotDefinitions: DEFAULT_SLOT_DEFINITIONS,
         autoReleaseMinutes: 120,
         cutoffMinutes: 60,
+        checkInOpensMinutesBefore: 30,
+        officeHours: DEFAULT_OFFICE_HOURS,
         timezone: TZ,
+        // demoOffsetSeconds is deliberately not reset: re-seeding must not
+        // yank the clock out from under a demo in progress.
       },
     });
 

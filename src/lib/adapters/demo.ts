@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import { SystemClock } from "@/lib/clock";
 import type {
   AuthProvider,
   CalendarSync,
@@ -58,26 +57,23 @@ export class DemoAuthProvider implements AuthProvider {
 }
 
 /**
- * Demo mail: writes to notification_log and stops. Nothing leaves the machine.
- * The Admin screen in Phase 5 reads this table as an outbox, which is how we
- * demonstrate the notification content without sending anything to real staff.
+ * Demo mail: a transport that delivers nowhere and succeeds.
+ *
+ * It used to write the notification_log row itself. It no longer does, and that
+ * is the point: from Phase 3 `notification_log` is the OUTBOX, written inside
+ * the booking transaction by src/lib/notifications/outbox.ts, and a
+ * MailProvider is only the thing that carries a message out of the building.
+ * Two writers would have meant every demo notification appearing twice, and
+ * would have hidden the queue's retry behaviour behind an adapter that could
+ * never fail.
+ *
+ * So in demo mode the message is already recorded and viewable at
+ * /admin/notifications before this is called; delivery is the only part that is
+ * simulated. Production swaps in GraphMailProvider and nothing else changes.
  */
 export class DemoMailProvider implements MailProvider {
-  async send(msg: OutboundMail): Promise<void> {
-    await db()
-      .insert(schema.notificationLog)
-      .values({
-        kind: msg.kind,
-        bookingId: msg.bookingId ?? null,
-        roomBookingId: msg.roomBookingId ?? null,
-        recipientEmail: msg.to,
-        subject: msg.subject,
-        body: msg.body,
-        channel: "email",
-        status: "sent",
-        attempts: 1,
-        sentAt: new SystemClock().now(),
-      });
+  async send(_msg: OutboundMail): Promise<void> {
+    // Nothing leaves the machine. The outbox row is the demonstration.
   }
 }
 

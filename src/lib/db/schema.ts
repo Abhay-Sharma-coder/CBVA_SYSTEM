@@ -41,12 +41,27 @@ export const seatStatusEnum = pgEnum("seat_status", [
   "decommissioned",
 ]);
 
-export const slotEnum = pgEnum("slot", ["AM", "PM"]);
+/**
+ * There is deliberately no `slot` enum.
+ *
+ * `bookings.slot` is text. The brief requires that switching from half-days to
+ * hourly booking be a change to `settings.slot_definitions` and nothing else —
+ * an enum makes that a migration, which is exactly the refactor it must not be.
+ * Slot keys are validated against the live definitions in src/lib/slots.ts,
+ * which is where an editable vocabulary belongs. See ADR-020.
+ */
 
 export const bookingStatusEnum = pgEnum("booking_status", [
   "confirmed",
   "checked_in",
   "cancelled_by_user",
+  /**
+   * Arrived, was counted present, then dropped the desk. A different fact from
+   * a plain cancellation, and occupancy reporting must not blend the two.
+   */
+  "cancelled_after_check_in",
+  /** We cancelled it for them — a desk was blocked, or a user deactivated. */
+  "cancelled_by_admin",
   "auto_released",
   "completed",
   "completed_no_show",
@@ -170,7 +185,8 @@ export const bookings = pgTable(
       .notNull()
       .references(() => seats.id, { onDelete: "restrict" }),
     bookingDate: date("booking_date").notNull(),
-    slot: slotEnum("slot").notNull(),
+    /** A key into settings.slot_definitions. Text, not an enum — see ADR-020. */
+    slot: text("slot").notNull(),
     /**
      * Derived from bookingDate + slot via deriveSlotBounds() in
      * src/lib/slots.ts. Stored so the auto-release job can range-scan without
@@ -187,8 +203,17 @@ export const bookings = pgTable(
     status: bookingStatusEnum("status").notNull().default("confirmed"),
     source: bookingSourceEnum("source").notNull().default("self"),
     checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+    /**
+     * How the check-in arrived: 'qr' | 'badge' | 'app' | 'admin'.
+     *
+     * The whole point of the desk QR recommendation. A door swipe proves
+     * somebody entered the floor; a desk QR proves they used THIS desk. They
+     * are different evidence and the analytics must be able to tell them apart.
+     */
+    checkInMethod: text("check_in_method"),
     releasedAt: timestamp("released_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledByUserId: uuid("cancelled_by_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -242,7 +267,13 @@ export const roomBookings = pgTable(
     status: roomBookingStatusEnum("status").notNull().default("confirmed"),
     calendarEventId: text("calendar_event_id"),
     syncStatus: syncStatusEnum("sync_status").notNull().default("pending"),
+    syncAttempts: integer("sync_attempts").notNull().default(0),
+    syncError: text("sync_error"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
@@ -288,7 +319,12 @@ export const notificationLog = pgTable(
     status: notificationStatusEnum("status").notNull().default("queued"),
     attempts: integer("attempts").notNull().default(0),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** Retry backoff. Null means "eligible now". */
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("notification_log_kind_idx").on(t.kind),
@@ -314,8 +350,24 @@ export const settings = pgTable("settings", {
   id: uuid("id").primaryKey().defaultRandom(),
   bookingWindowDays: integer("booking_window_days").notNull().default(14),
   slotDefinitions: jsonb("slot_definitions").notNull(),
+  /**
+   * The rule the brief states: the next N WORKING days are bookable.
+   * bookingWindowDays above stays as the calendar-day bound the scan stops at,
+   * so a long run of holidays cannot make it unbounded.
+   */
+  bookingWindowWorkingDays: integer("booking_window_working_days")
+    .notNull()
+    .default(5),
   autoReleaseMinutes: integer("auto_release_minutes").notNull().default(120),
   cutoffMinutes: integer("cutoff_minutes").notNull().default(60),
+  /** How early a booking may be checked into, relative to its slot start. */
+  checkInOpensMinutesBefore: integer("check_in_opens_minutes_before")
+    .notNull()
+    .default(30),
+  /** { start: "HH:mm", end: "HH:mm" } — the bounds of the meeting room grid. */
+  officeHours: jsonb("office_hours")
+    .notNull()
+    .default(sql`'{"start":"08:00","end":"20:00"}'::jsonb`),
   timezone: text("timezone").notNull().default("Asia/Kolkata"),
   /**
    * DemoClock offset. Held here rather than in memory so server and client
@@ -353,7 +405,14 @@ export type RoomBooking = typeof roomBookings.$inferSelect;
 export type NewRoomBooking = typeof roomBookings.$inferInsert;
 export type BadgeEvent = typeof badgeEvents.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type Zone = typeof zones.$inferSelect;
+export type Floor = typeof floors.$inferSelect;
+export type Holiday = typeof holidays.$inferSelect;
+export type NotificationLog = typeof notificationLog.$inferSelect;
+export type NewNotificationLog = typeof notificationLog.$inferInsert;
+export type AuditLog = typeof auditLog.$inferSelect;
 export type Grade = (typeof gradeEnum.enumValues)[number];
-export type Slot = (typeof slotEnum.enumValues)[number];
+/** A key into settings.slot_definitions, not a closed set. See ADR-020. */
+export type Slot = string;
 export type BookingStatus = (typeof bookingStatusEnum.enumValues)[number];
 export type SeatStatus = (typeof seatStatusEnum.enumValues)[number];

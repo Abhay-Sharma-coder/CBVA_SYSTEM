@@ -19,16 +19,28 @@ export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be yyyy-MM-dd"),
-  slot: z.enum(["AM", "PM"]),
+  // Not an enum: the slot vocabulary is settings data now (ADR-020), and an
+  // unknown key is refused by the write path with a message naming the real
+  // options rather than by a 400 here.
+  slot: z.string().min(1).max(12),
 });
 
 /**
  * Every seat on the floor, resolved to a visual status for one date, one slot
  * and one viewer.
  *
- * Only booking rows that actually hold a seat are joined in — cancelled,
- * auto-released and no-show rows stay in the table because the history is the
- * analytics, but they must not make a desk look taken.
+ * Which booking rows are joined is a deliberate list, not a convenience:
+ *
+ * - `confirmed` / `checked_in` hold the desk. Same predicate as seat_slot_unique.
+ * - `completed` holds it too, so a past day still reads as occupied rather than
+ *   emptying out behind you.
+ * - `auto_released` does NOT hold the desk — it is free — but it is joined so
+ *   the plan can say the desk came free LATE. That distinction is the 2-hour
+ *   rule made visible, and without this row `seatVisualStatus`'s auto_released
+ *   branch would be unreachable code.
+ *
+ * Cancelled rows are excluded entirely. They stay in the table because the
+ * history is the analytics, but they must never make a desk look taken.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -66,9 +78,12 @@ export async function GET(request: Request) {
   const bookingRows = await database
     .select({
       seatCode: schema.seats.seatCode,
+      bookingId: schema.bookings.id,
       status: schema.bookings.status,
       occupantEmail: schema.users.email,
       occupantName: schema.users.displayName,
+      updatedAt: schema.bookings.updatedAt,
+      createdAt: schema.bookings.createdAt,
     })
     .from(schema.bookings)
     .innerJoin(schema.seats, eq(schema.bookings.seatId, schema.seats.id))
@@ -77,14 +92,35 @@ export async function GET(request: Request) {
       and(
         eq(schema.bookings.bookingDate, date),
         eq(schema.bookings.slot, slot),
-        // The partial index behind seat_slot_unique covers confirmed and
-        // checked_in; completed is included so a past day still reads as
-        // occupied rather than emptying out behind you.
-        inArray(schema.bookings.status, ["confirmed", "checked_in", "completed"]),
+        inArray(schema.bookings.status, [
+          "confirmed",
+          "checked_in",
+          "completed",
+          "auto_released",
+        ]),
       ),
     );
 
-  const bookingBySeat = new Map(bookingRows.map((b) => [b.seatCode, b] as const));
+  /**
+   * One desk and slot can carry several rows: a booking that was released, then
+   * a second person's booking on the freed desk, and both may finish. The row
+   * that describes the desk's CURRENT state is the one that still holds it — so
+   * a holding row always beats a released one, and among equals the newest wins.
+   */
+  const HOLDS = new Set(["confirmed", "checked_in", "completed"]);
+  const bookingBySeat = new Map<string, (typeof bookingRows)[number]>();
+  for (const row of bookingRows) {
+    const existing = bookingBySeat.get(row.seatCode);
+    if (!existing) {
+      bookingBySeat.set(row.seatCode, row);
+      continue;
+    }
+    const better =
+      (HOLDS.has(row.status) && !HOLDS.has(existing.status)) ||
+      (HOLDS.has(row.status) === HOLDS.has(existing.status) &&
+        row.createdAt > existing.createdAt);
+    if (better) bookingBySeat.set(row.seatCode, row);
+  }
 
   let occupied = 0;
   let capacity = 0;
@@ -103,6 +139,9 @@ export async function GET(request: Request) {
     if (countsAsOccupied(status)) occupied += 1;
     if (countsAsCapacity(status)) capacity += 1;
 
+    const yours =
+      booking != null && viewer != null && booking.occupantEmail === viewer.email;
+
     return {
       seatCode: row.seatCode,
       bay: row.bay,
@@ -115,6 +154,11 @@ export async function GET(request: Request) {
       seatStatus: input.seatStatus,
       status,
       occupantName: seatOccupantLabel(input),
+      // Carried so the booking dialog can edit or cancel straight from the
+      // plan without a second round trip. Only for the viewer's own booking:
+      // nobody needs the id of a desk that is not theirs.
+      bookingId: yours ? booking!.bookingId : null,
+      bookingUpdatedAt: yours ? booking!.updatedAt.toISOString() : null,
       // Where the position came from: the drawing, an interpolation, or
       // somebody dragging it in the editor. The editor badges the weak ones.
       anchorSource: seatAnchor(row.seatCode)?.source ?? "manual",

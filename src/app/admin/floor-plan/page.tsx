@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 
 import { FloorPlanEditor } from "@/app/admin/floor-plan/editor";
 import { auth } from "@/lib/adapters";
-import { bookableDays } from "@/lib/booking-days";
+import { bookableDates } from "@/lib/booking-days";
+import { getSettings } from "@/lib/settings";
 import { getClock } from "@/lib/clock";
 import { db, schema } from "@/lib/db";
 import { floorplanDetectionReport } from "@/lib/floorplan";
@@ -20,18 +21,20 @@ export default async function Page() {
 
   const clock = await getClock();
   const database = db();
-  const [settings] = await database.select().from(schema.settings).limit(1);
+  const settings = await getSettings(database);
   const holidayRows = await database
     .select({ holidayDate: schema.holidays.holidayDate })
     .from(schema.holidays);
 
-  const days = bookableDays({
+  const dates = bookableDates({
     now: clock.now(),
-    windowDays: settings?.bookingWindowDays ?? 14,
+    workingDays: 1,
+    calendarBound: settings.bookingWindowDays,
     holidays: new Set(holidayRows.map((h) => h.holidayDate)),
-    limit: 1,
+    timezone: settings.timezone,
   });
-  const date = days[0]?.date ?? "2026-01-01";
+  const date = dates[0] ?? "2026-01-01";
+  const slot = settings.slotDefinitions[0]?.key ?? "AM";
 
   const report = floorplanDetectionReport;
   const detected = report.bays.reduce((n, b) => n + b.detected, 0);
@@ -47,7 +50,7 @@ export default async function Page() {
         </p>
       </header>
 
-      <FloorPlanEditor date={date} slot="AM" />
+      <FloorPlanEditor date={date} slot={slot} />
 
       <Card>
         <CardHeader>

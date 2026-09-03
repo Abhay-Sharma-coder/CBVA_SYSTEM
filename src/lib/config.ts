@@ -15,6 +15,15 @@ const serverEnvSchema = z.object({
    * Falls back to DATABASE_URL when the deployment has only one endpoint.
    */
   DATABASE_URL_UNPOOLED: z.string().min(1).optional(),
+  /**
+   * Shared secret for the scheduled-job route. Vercel Cron sends it as
+   * `Authorization: Bearer`; the demo panel and curl may send `x-cron-secret`.
+   * Optional in demo — an unprotected job endpoint on a laptop is not a risk
+   * worth a required variable — and checked at the route in production.
+   */
+  CRON_SECRET: z.string().min(1).optional(),
+  /** Origin the printed desk QR codes point at. */
+  NEXT_PUBLIC_APP_URL: z.string().min(1).optional(),
 });
 
 export type AppMode = z.infer<typeof serverEnvSchema>["APP_MODE"];
@@ -25,6 +34,8 @@ export interface ServerEnv {
   appMode: AppMode;
   databaseUrl: string;
   databaseUrlDirect: string;
+  cronSecret: string | null;
+  appUrl: string;
 }
 
 export function serverEnv(): ServerEnv {
@@ -40,6 +51,8 @@ export function serverEnv(): ServerEnv {
     appMode: parsed.data.APP_MODE,
     databaseUrl: parsed.data.DATABASE_URL,
     databaseUrlDirect: parsed.data.DATABASE_URL_UNPOOLED ?? parsed.data.DATABASE_URL,
+    cronSecret: parsed.data.CRON_SECRET ?? null,
+    appUrl: parsed.data.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:8081",
   };
   return cached;
 }

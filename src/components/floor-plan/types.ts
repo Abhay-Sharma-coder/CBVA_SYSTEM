@@ -22,6 +22,17 @@ export interface FloorPlanSeat {
   status: SeatVisualStatus;
   /** Occupant name, or the allocated name on a fixed desk. Null when free. */
   occupantName: string | null;
+  /**
+   * The viewer's OWN booking on this desk, when there is one. Null otherwise —
+   * including when somebody else has it, because nothing on the plan needs the
+   * identifier of a booking it cannot change.
+   *
+   * Carried on the seat so the dialog can cancel or edit straight from the plan
+   * rather than fetching the booking again on open.
+   */
+  bookingId: string | null;
+  /** The optimistic-lock value for that booking. */
+  bookingUpdatedAt: string | null;
   /** How the position was arrived at. Surfaced in the editor, not on /floor. */
   anchorSource: AnchorSource;
 }
@@ -35,14 +46,14 @@ export interface BookableDay {
   isToday: boolean;
 }
 
-export type SlotKey = "AM" | "PM";
+/**
+ * A key into settings.slot_definitions — "AM", "PM", or "H09" if CBVA ever
+ * switches to hourly. Deliberately not a union: the vocabulary is data, and a
+ * closed type here would put the refactor back that ADR-020 removed.
+ */
+export type SlotKey = string;
 
-export interface SlotDefinition {
-  key: SlotKey;
-  label: string;
-  start: string;
-  end: string;
-}
+export type { SlotDefinition } from "@/lib/slots";
 
 export interface FloorPlanPayload {
   date: string;

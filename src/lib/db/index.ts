@@ -5,7 +5,10 @@ import * as schema from "./schema";
 
 export * as schema from "./schema";
 
-type Db = NodePgDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof schema>;
+
+/** Anything you can run a statement on: a pool handle or a transaction. */
+export type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /**
  * Two pools, deliberately.

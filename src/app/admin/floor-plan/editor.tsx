@@ -6,7 +6,7 @@ import { Magnet, Redo2, RotateCw, Save, Undo2 } from "lucide-react";
 
 import { FloorPlan } from "@/components/floor-plan/floor-plan";
 import { ZoneFilter } from "@/components/floor-plan/controls";
-import type { FloorPlanPayload, FloorPlanSeat } from "@/components/floor-plan/types";
+import type { FloorPlanPayload, FloorPlanSeat, SlotKey } from "@/components/floor-plan/types";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardBody, CardHeader, CardTitle } from "@/components/ui/primitives";
 import { nearestDetectedModule } from "@/lib/floorplan";
@@ -51,7 +51,7 @@ async function getJson<T>(url: string): Promise<T> {
  * It renders through the same <FloorPlan> component as /floor rather than a
  * second, drifting copy — the only difference is that it passes onDragSeat.
  */
-export function FloorPlanEditor({ date, slot }: { date: string; slot: "AM" | "PM" }) {
+export function FloorPlanEditor({ date, slot }: { date: string; slot: SlotKey }) {
   const [overrides, setOverrides] = useState<Record<string, Geometry>>({});
   const [undoStack, setUndoStack] = useState<Edit[]>([]);
   const [redoStack, setRedoStack] = useState<Edit[]>([]);

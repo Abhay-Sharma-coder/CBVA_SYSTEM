@@ -1,0 +1,803 @@
+/**
+ * Booking writes.
+ *
+ * Every function here takes its database handle, its Clock and its actor as
+ * arguments and touches nothing ambient. That is not ceremony:
+ *
+ * - the eighteen edge cases the brief specifies are all about timing and
+ *   concurrency, and none of them is testable through HTTP with a real clock;
+ * - `auth()` reads `next/headers` and throws outside a request, so a service
+ *   that called it could never be tested at all;
+ * - the concurrency proofs need two independent sessions on the DIRECT
+ *   endpoint, which means the handle has to be a parameter.
+ *
+ * THE RULE THAT SHAPES THIS FILE: there is no "is this seat free?" check
+ * anywhere. ADR-003 put that rule in the database because a read-then-write has
+ * a race window and two people tapping Book at the same moment is exactly the
+ * case that must not double-book. `23505` is an ordinary outcome here, mapped
+ * to a sentence a person can act on.
+ */
+import { and, eq, inArray, sql } from "drizzle-orm";
+
+import { writeAudit } from "@/lib/audit";
+import {
+  assertMayBookFor,
+  assertMayMutateBooking,
+  assertSeatBookable,
+} from "@/lib/booking/authorise";
+import { BookingError, rethrowMapped } from "@/lib/booking/errors";
+import {
+  assertBeforeCutoff,
+  assertDateBookable,
+  checkInOpensAt,
+  requireSlot,
+} from "@/lib/booking/rules";
+import type { Clock } from "@/lib/clock";
+import { schema, type Db, type DbLike } from "@/lib/db";
+import type { Booking, Seat, User } from "@/lib/db/schema";
+import { enqueueNotification } from "@/lib/notifications/outbox";
+import { renderSeatNotification } from "@/lib/notifications/render";
+import { getSettings, type AppSettings } from "@/lib/settings";
+import { deriveSlotBounds, type SlotDefinition } from "@/lib/slots";
+
+/** Booking states that hold a desk, i.e. the partial unique index predicate. */
+export const ACTIVE_BOOKING_STATUSES = ["confirmed", "checked_in"] as const;
+
+export type CheckInMethod = "qr" | "badge" | "app" | "admin";
+
+export interface ServiceContext {
+  db: Db;
+  clock: Clock;
+  actor: User;
+}
+
+/* ------------------------------------------------------------------ shared */
+
+async function loadHolidays(db: DbLike): Promise<Set<string>> {
+  const rows = await db.select({ d: schema.holidays.holidayDate }).from(schema.holidays);
+  return new Set(rows.map((r) => r.d));
+}
+
+async function seatByCode(db: DbLike, seatCode: string) {
+  const [row] = await db
+    .select({
+      seat: schema.seats,
+      zoneCode: schema.zones.code,
+    })
+    .from(schema.seats)
+    .innerJoin(schema.zones, eq(schema.seats.zoneId, schema.zones.id))
+    .where(eq(schema.seats.seatCode, seatCode))
+    .limit(1);
+  return row;
+}
+
+async function userById(db: DbLike, id: string): Promise<User | undefined> {
+  const [row] = await db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1);
+  return row;
+}
+
+/**
+ * The existing active booking for a person on a date and slot, if any.
+ *
+ * Read ONLY to explain a conflict after the database has already rejected the
+ * write (edge case 10 asks for the existing booking to be shown). It is never
+ * consulted beforehand to decide whether the write may proceed — that is the
+ * pre-check ADR-003 forbids.
+ */
+async function explainOccupantConflict(
+  db: DbLike,
+  occupantUserId: string,
+  bookingDate: string,
+  slot: string,
+) {
+  const [row] = await db
+    .select({
+      id: schema.bookings.id,
+      seatCode: schema.seats.seatCode,
+      bay: schema.seats.bay,
+      status: schema.bookings.status,
+      bookingDate: schema.bookings.bookingDate,
+      slot: schema.bookings.slot,
+    })
+    .from(schema.bookings)
+    .innerJoin(schema.seats, eq(schema.bookings.seatId, schema.seats.id))
+    .where(
+      and(
+        eq(schema.bookings.occupantUserId, occupantUserId),
+        eq(schema.bookings.bookingDate, bookingDate),
+        eq(schema.bookings.slot, slot),
+        inArray(schema.bookings.status, [...ACTIVE_BOOKING_STATUSES]),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+interface NotifyArgs {
+  seatCode: string;
+  zone: string;
+  bay: string;
+  bookingDate: string;
+  slot: SlotDefinition;
+  occupant: User;
+  booker: User;
+  bookingId: string;
+  reason?: string;
+  previous?: { seatCode: string; bookingDate: string; slot: SlotDefinition };
+}
+
+function notifyContext(a: NotifyArgs) {
+  return {
+    occupantName: a.occupant.displayName,
+    bookerName: a.booker.displayName,
+    onBehalf: a.occupant.id !== a.booker.id,
+    seatCode: a.seatCode,
+    zone: a.zone,
+    bay: a.bay,
+    bookingDate: a.bookingDate,
+    slot: a.slot,
+    reason: a.reason,
+    previous: a.previous,
+  };
+}
+
+/* ------------------------------------------------------------------ create */
+
+export interface CreateBookingInput {
+  seatCode: string;
+  bookingDate: string;
+  slot: string;
+  /** Omit to book for yourself. */
+  occupantUserId?: string;
+}
+
+export interface BookingResult {
+  booking: Booking;
+  seatCode: string;
+  zone: string;
+  bay: string;
+  slot: SlotDefinition;
+  occupantName: string;
+}
+
+export async function createBooking(
+  ctx: ServiceContext,
+  input: CreateBookingInput,
+): Promise<BookingResult> {
+  const now = ctx.clock.now();
+  const settings = await getSettings(ctx.db);
+  const slot = requireSlot(settings, input.slot);
+  const holidays = await loadHolidays(ctx.db);
+
+  assertDateBookable(input.bookingDate, now, settings, holidays);
+
+  const seatRow = await seatByCode(ctx.db, input.seatCode);
+  assertSeatBookable(seatRow?.seat);
+  const seat: Seat = seatRow!.seat;
+  const zone = seatRow!.zoneCode;
+
+  const occupant =
+    input.occupantUserId && input.occupantUserId !== ctx.actor.id
+      ? await userById(ctx.db, input.occupantUserId)
+      : ctx.actor;
+  if (!occupant) {
+    throw new BookingError("USER_NOT_FOUND", "That colleague is not on the staff list.");
+  }
+  assertMayBookFor(ctx.actor, occupant);
+
+  const { startsAt, endsAt } = deriveSlotBounds(
+    input.bookingDate,
+    slot.key,
+    settings.slotDefinitions,
+    settings.timezone,
+  );
+
+  // A booking whose cut-off has already passed cannot be made either — booking
+  // a desk five minutes before a slot you can no longer cancel is a trap.
+  assertBeforeCutoff(now, startsAt, settings.cutoffMinutes, settings.timezone);
+
+  try {
+    return await ctx.db.transaction(async (tx) => {
+      const [booking] = await tx
+        .insert(schema.bookings)
+        .values({
+          seatId: seat.id,
+          bookingDate: input.bookingDate,
+          slot: slot.key,
+          startsAt,
+          endsAt,
+          bookedByUserId: ctx.actor.id,
+          occupantUserId: occupant.id,
+          status: "confirmed",
+          source: occupant.id === ctx.actor.id ? "self" : ctx.actor.isAdmin ? "admin" : "on_behalf",
+          // Always written explicitly rather than left to DEFAULT now(): the
+          // optimistic lock compares this value after a JSON round trip, and a
+          // Postgres default carries microseconds a JS Date cannot hold.
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      const args: NotifyArgs = {
+        seatCode: seat.seatCode,
+        zone,
+        bay: seat.bay,
+        bookingDate: input.bookingDate,
+        slot,
+        occupant,
+        booker: ctx.actor,
+        bookingId: booking!.id,
+      };
+
+      await enqueueNotification(tx, {
+        kind: "booking_confirmed",
+        to: ctx.actor.email,
+        bookingId: booking!.id,
+        rendered: renderSeatNotification("booking_confirmed", notifyContext(args)),
+      });
+
+      // The colleague gets their own message. Being given a desk without being
+      // told is how a booking becomes a no-show.
+      if (occupant.id !== ctx.actor.id) {
+        await enqueueNotification(tx, {
+          kind: "booked_on_your_behalf",
+          to: occupant.email,
+          bookingId: booking!.id,
+          rendered: renderSeatNotification("booked_on_your_behalf", notifyContext(args)),
+        });
+      }
+
+      await writeAudit(tx, {
+        actorUserId: ctx.actor.id,
+        entity: "bookings",
+        entityId: booking!.id,
+        action: "create",
+        after: {
+          seatCode: seat.seatCode,
+          bookingDate: input.bookingDate,
+          slot: slot.key,
+          occupantUserId: occupant.id,
+          source: booking!.source,
+        },
+      });
+
+      return {
+        booking: booking!,
+        seatCode: seat.seatCode,
+        zone,
+        bay: seat.bay,
+        slot,
+        occupantName: occupant.displayName,
+      };
+    });
+  } catch (err) {
+    await decorateOccupantConflict(err, ctx.db, occupant.id, input.bookingDate, slot.key);
+    return rethrowMapped(err);
+  }
+}
+
+/**
+ * Adds the offending booking to an OCCUPANT_ALREADY_BOOKED error.
+ *
+ * Edge case 10 asks for the existing booking to be shown rather than a bare
+ * refusal — "Rahul already has C3-04 that afternoon" is actionable, "conflict"
+ * is not.
+ */
+async function decorateOccupantConflict(
+  err: unknown,
+  db: Db,
+  occupantUserId: string,
+  bookingDate: string,
+  slot: string,
+): Promise<void> {
+  const e = err as { code?: string; constraint?: string };
+  if (e?.code !== "23505" || e?.constraint !== "occupant_slot_unique") return;
+  const existing = await explainOccupantConflict(db, occupantUserId, bookingDate, slot);
+  throw new BookingError(
+    "OCCUPANT_ALREADY_BOOKED",
+    existing
+      ? `There is already a desk booked for that slot: ${existing.seatCode}.`
+      : "There is already a desk booked for that person in that slot.",
+    { existing },
+  );
+}
+
+/* -------------------------------------------------------------------- edit */
+
+export interface EditBookingInput {
+  bookingId: string;
+  /** The value the client last read. The optimistic lock. */
+  expectedUpdatedAt: string;
+  seatCode: string;
+  bookingDate: string;
+  slot: string;
+}
+
+/**
+ * Change date, slot or seat.
+ *
+ * Implemented as cancel-and-rebook inside ONE transaction, which is what keeps
+ * `seat_slot_unique` protecting us. Updating the row in place would either have
+ * to move it through a state where it holds neither desk, or hold both — and if
+ * the new desk turns out to be taken, a rolled-back transaction leaves the
+ * original booking exactly as it was. The user never ends up with nothing.
+ */
+export async function editBooking(
+  ctx: ServiceContext,
+  input: EditBookingInput,
+): Promise<BookingResult> {
+  const now = ctx.clock.now();
+  const settings = await getSettings(ctx.db);
+  const slot = requireSlot(settings, input.slot);
+  const holidays = await loadHolidays(ctx.db);
+
+  const existing = await loadBookingRow(ctx.db, input.bookingId);
+  assertMayMutateBooking(ctx.actor, existing.booking);
+
+  if (!(["confirmed", "checked_in"] as string[]).includes(existing.booking.status)) {
+    throw new BookingError(
+      "BOOKING_NOT_ACTIVE",
+      "That booking is no longer active, so it cannot be changed.",
+    );
+  }
+
+  // Both ends of the move are gated: you may not escape a closed slot, and you
+  // may not move into one that is already closed.
+  assertBeforeCutoff(now, existing.booking.startsAt, settings.cutoffMinutes, settings.timezone);
+  assertDateBookable(input.bookingDate, now, settings, holidays);
+
+  const seatRow = await seatByCode(ctx.db, input.seatCode);
+  assertSeatBookable(seatRow?.seat);
+  const seat = seatRow!.seat;
+  const zone = seatRow!.zoneCode;
+
+  const occupant = await userById(ctx.db, existing.booking.occupantUserId);
+  if (!occupant) throw new BookingError("USER_NOT_FOUND", "That colleague is no longer on the list.");
+
+  const { startsAt, endsAt } = deriveSlotBounds(
+    input.bookingDate,
+    slot.key,
+    settings.slotDefinitions,
+    settings.timezone,
+  );
+  assertBeforeCutoff(now, startsAt, settings.cutoffMinutes, settings.timezone);
+
+  const previous = {
+    seatCode: existing.seatCode,
+    bookingDate: existing.booking.bookingDate,
+    slot:
+      settings.slotDefinitions.find((d) => d.key === existing.booking.slot) ?? {
+        key: existing.booking.slot,
+        label: existing.booking.slot,
+        start: "",
+        end: "",
+      },
+  };
+
+  try {
+    return await ctx.db.transaction(async (tx) => {
+      /**
+       * The optimistic lock (edge case 13).
+       *
+       * `date_trunc('milliseconds', …)` is load-bearing. Postgres timestamps
+       * carry microseconds; the value the client echoes back has been through
+       * `Date.toISOString()` and lost them. Comparing raw would make every edit
+       * of a row written by DEFAULT now() fail with a spurious conflict.
+       */
+      const cancelled = await tx
+        .update(schema.bookings)
+        .set({
+          status: "cancelled_by_user",
+          cancelledAt: now,
+          cancelledByUserId: ctx.actor.id,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.bookings.id, input.bookingId),
+            inArray(schema.bookings.status, [...ACTIVE_BOOKING_STATUSES]),
+            sql`date_trunc('milliseconds', ${schema.bookings.updatedAt}) = ${new Date(
+              input.expectedUpdatedAt,
+            )}`,
+          ),
+        )
+        .returning({ id: schema.bookings.id });
+
+      if (cancelled.length === 0) {
+        throw new BookingError(
+          "BOOKING_CONFLICT",
+          "Somebody else changed this booking while you had it open. It has been reloaded — please check it and try again.",
+        );
+      }
+
+      const [booking] = await tx
+        .insert(schema.bookings)
+        .values({
+          seatId: seat.id,
+          bookingDate: input.bookingDate,
+          slot: slot.key,
+          startsAt,
+          endsAt,
+          bookedByUserId: existing.booking.bookedByUserId,
+          occupantUserId: existing.booking.occupantUserId,
+          status: "confirmed",
+          source: existing.booking.source,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      const args: NotifyArgs = {
+        seatCode: seat.seatCode,
+        zone,
+        bay: seat.bay,
+        bookingDate: input.bookingDate,
+        slot,
+        occupant,
+        booker: ctx.actor,
+        bookingId: booking!.id,
+        previous,
+      };
+
+      await enqueueNotification(tx, {
+        kind: "booking_edited",
+        to: occupant.email,
+        bookingId: booking!.id,
+        rendered: renderSeatNotification("booking_edited", notifyContext(args)),
+      });
+
+      await writeAudit(tx, {
+        actorUserId: ctx.actor.id,
+        entity: "bookings",
+        entityId: booking!.id,
+        action: "edit",
+        before: {
+          bookingId: input.bookingId,
+          seatCode: previous.seatCode,
+          bookingDate: previous.bookingDate,
+          slot: existing.booking.slot,
+        },
+        after: {
+          seatCode: seat.seatCode,
+          bookingDate: input.bookingDate,
+          slot: slot.key,
+        },
+      });
+
+      return {
+        booking: booking!,
+        seatCode: seat.seatCode,
+        zone,
+        bay: seat.bay,
+        slot,
+        occupantName: occupant.displayName,
+      };
+    });
+  } catch (err) {
+    if (err instanceof BookingError) throw err;
+    await decorateOccupantConflict(err, ctx.db, existing.booking.occupantUserId, input.bookingDate, slot.key);
+    return rethrowMapped(err);
+  }
+}
+
+/* ------------------------------------------------------------------ cancel */
+
+export interface CancelBookingInput {
+  bookingId: string;
+  /** Optional optimistic lock; omitted by admin force-cancellation. */
+  expectedUpdatedAt?: string;
+  /** Skips the cut-off. Admin-initiated cancellations only. */
+  force?: boolean;
+  /**
+   * Marks the outcome as `cancelled_by_admin` rather than a user cancellation.
+   * The distinction matters to analytics: "the firm took this desk away" is not
+   * evidence about whether that person intended to come in.
+   */
+  byAdmin?: boolean;
+  reason?: string;
+}
+
+export async function cancelBooking(
+  ctx: ServiceContext,
+  input: CancelBookingInput,
+): Promise<Booking> {
+  const now = ctx.clock.now();
+  const settings = await getSettings(ctx.db);
+  const existing = await loadBookingRow(ctx.db, input.bookingId);
+  assertMayMutateBooking(ctx.actor, existing.booking);
+
+  if (!(["confirmed", "checked_in"] as string[]).includes(existing.booking.status)) {
+    throw new BookingError("BOOKING_NOT_ACTIVE", "That booking has already ended.");
+  }
+
+  if (!input.force) {
+    assertBeforeCutoff(now, existing.booking.startsAt, settings.cutoffMinutes, settings.timezone);
+  }
+
+  /**
+   * EDGE CASE 5. Cancelling after checking in is allowed — people do leave —
+   * but it is a different fact from never turning up, and the occupancy report
+   * must be able to separate "held a desk and used it, briefly" from "held a
+   * desk and did not come". `checked_in_at` is deliberately left in place.
+   *
+   * An admin-initiated cancellation outranks both: whatever the occupant had
+   * done, the reason the booking ended was the firm, not them.
+   */
+  const status = input.byAdmin
+    ? "cancelled_by_admin"
+    : existing.booking.status === "checked_in"
+      ? "cancelled_after_check_in"
+      : "cancelled_by_user";
+
+  return ctx.db.transaction(async (tx) => {
+    const conditions = [
+      eq(schema.bookings.id, input.bookingId),
+      inArray(schema.bookings.status, [...ACTIVE_BOOKING_STATUSES]),
+    ];
+    if (input.expectedUpdatedAt) {
+      conditions.push(
+        sql`date_trunc('milliseconds', ${schema.bookings.updatedAt}) = ${new Date(
+          input.expectedUpdatedAt,
+        )}`,
+      );
+    }
+
+    const rows = await tx
+      .update(schema.bookings)
+      .set({
+        status,
+        cancelledAt: now,
+        cancelledByUserId: ctx.actor.id,
+        updatedAt: now,
+      })
+      .where(and(...conditions))
+      .returning();
+
+    if (rows.length === 0) {
+      throw new BookingError(
+        "BOOKING_CONFLICT",
+        "That booking changed while you were looking at it. It has been reloaded.",
+      );
+    }
+
+    const occupant = await userById(tx, existing.booking.occupantUserId);
+    const slot = settings.slotDefinitions.find((d) => d.key === existing.booking.slot) ?? {
+      key: existing.booking.slot,
+      label: existing.booking.slot,
+      start: "",
+      end: "",
+    };
+
+    if (occupant) {
+      await enqueueNotification(tx, {
+        kind: "booking_cancelled",
+        to: occupant.email,
+        bookingId: rows[0]!.id,
+        rendered: renderSeatNotification("booking_cancelled", {
+          occupantName: occupant.displayName,
+          bookerName: ctx.actor.displayName,
+          onBehalf: occupant.id !== ctx.actor.id,
+          seatCode: existing.seatCode,
+          zone: existing.zoneCode,
+          bay: existing.bay,
+          bookingDate: existing.booking.bookingDate,
+          slot,
+          reason: input.reason,
+        }),
+      });
+      // Whoever made the booking is told too, when that is somebody else.
+      if (existing.booking.bookedByUserId !== occupant.id) {
+        const booker = await userById(tx, existing.booking.bookedByUserId);
+        if (booker && booker.id !== ctx.actor.id) {
+          await enqueueNotification(tx, {
+            kind: "booking_cancelled",
+            to: booker.email,
+            bookingId: rows[0]!.id,
+            rendered: renderSeatNotification("booking_cancelled", {
+              occupantName: occupant.displayName,
+              bookerName: booker.displayName,
+              onBehalf: true,
+              seatCode: existing.seatCode,
+              zone: existing.zoneCode,
+              bay: existing.bay,
+              bookingDate: existing.booking.bookingDate,
+              slot,
+              reason: input.reason,
+            }),
+          });
+        }
+      }
+    }
+
+    await writeAudit(tx, {
+      actorUserId: ctx.actor.id,
+      entity: "bookings",
+      entityId: rows[0]!.id,
+      action: input.force ? "force_cancel" : "cancel",
+      before: { status: existing.booking.status },
+      after: { status, reason: input.reason ?? null },
+    });
+
+    return rows[0]!;
+  });
+}
+
+/* ---------------------------------------------------------------- check-in */
+
+export interface CheckInInput {
+  bookingId?: string;
+  /** The QR path: which desk somebody is actually sitting at. */
+  seatCode?: string;
+  /** Whose check-in this is. Defaults to the actor. */
+  userId?: string;
+  method: CheckInMethod;
+}
+
+export interface CheckInResult {
+  booking: Booking;
+  seatCode: string;
+  slot: SlotDefinition;
+  /** True when the booking was already checked in — the call is idempotent. */
+  alreadyCheckedIn: boolean;
+}
+
+/**
+ * Turns a claim into evidence.
+ *
+ * An un-checked-in booking is somebody saying they will come; a check-in is
+ * somebody having come. PROJECT.md is explicit that analytics must keep the two
+ * apart, which is why `check_in_method` is recorded: a door swipe proves
+ * presence on the floor, a desk QR proves use of THAT desk.
+ *
+ * Idempotent by design. Scanning the QR twice, or swiping a badge and then
+ * scanning, must not be an error — people will do both.
+ */
+export async function checkInBooking(
+  ctx: ServiceContext,
+  input: CheckInInput,
+): Promise<CheckInResult> {
+  const now = ctx.clock.now();
+  const settings = await getSettings(ctx.db);
+  const userId = input.userId ?? ctx.actor.id;
+
+  if (userId !== ctx.actor.id && !ctx.actor.isAdmin) {
+    throw new BookingError("FORBIDDEN", "You can only check in your own booking.");
+  }
+
+  const found = input.bookingId
+    ? await loadBookingRow(ctx.db, input.bookingId)
+    : await findCheckInCandidate(ctx.db, userId, input.seatCode!, now, settings);
+
+  if (found.booking.occupantUserId !== userId && !ctx.actor.isAdmin) {
+    throw new BookingError("FORBIDDEN", "That booking is not yours to check into.");
+  }
+
+  const slot = settings.slotDefinitions.find((d) => d.key === found.booking.slot) ?? {
+    key: found.booking.slot,
+    label: found.booking.slot,
+    start: "",
+    end: "",
+  };
+
+  if (found.booking.status === "checked_in") {
+    return { booking: found.booking, seatCode: found.seatCode, slot, alreadyCheckedIn: true };
+  }
+  if (found.booking.status !== "confirmed") {
+    throw new BookingError(
+      "BOOKING_NOT_ACTIVE",
+      found.booking.status === "auto_released"
+        ? `${found.seatCode} was released because nobody checked in within ${settings.autoReleaseMinutes} minutes. Book another desk from the floor plan.`
+        : "That booking is no longer active.",
+    );
+  }
+
+  const opensAt = checkInOpensAt(found.booking.startsAt, settings.checkInOpensMinutesBefore);
+  if (now < opensAt || now >= found.booking.endsAt) {
+    throw new BookingError(
+      "CHECK_IN_WINDOW_CLOSED",
+      now < opensAt
+        ? `Check-in for ${found.seatCode} opens ${settings.checkInOpensMinutesBefore} minutes before the slot starts.`
+        : `That slot has finished, so ${found.seatCode} can no longer be checked into.`,
+    );
+  }
+
+  return ctx.db.transaction(async (tx) => {
+    const rows = await tx
+      .update(schema.bookings)
+      .set({
+        status: "checked_in",
+        checkedInAt: now,
+        checkInMethod: input.method,
+        updatedAt: now,
+      })
+      .where(and(eq(schema.bookings.id, found.booking.id), eq(schema.bookings.status, "confirmed")))
+      .returning();
+
+    if (rows.length === 0) {
+      // Somebody (or the auto-release job) moved it between the read and here.
+      throw new BookingError(
+        "BOOKING_NOT_ACTIVE",
+        "That booking changed a moment ago and could not be checked in. Reload and try again.",
+      );
+    }
+
+    await writeAudit(tx, {
+      actorUserId: ctx.actor.id,
+      entity: "bookings",
+      entityId: rows[0]!.id,
+      action: "check_in",
+      after: { method: input.method, at: now.toISOString(), seatCode: found.seatCode },
+    });
+
+    return { booking: rows[0]!, seatCode: found.seatCode, slot, alreadyCheckedIn: false };
+  });
+}
+
+/**
+ * The QR path: given a desk and a person, which booking is this?
+ *
+ * Scoped to the slot that is actually running, so scanning C3-04 at 10:00 finds
+ * the morning booking and not the afternoon one somebody also holds.
+ */
+async function findCheckInCandidate(
+  db: Db,
+  userId: string,
+  seatCode: string,
+  now: Date,
+  settings: AppSettings,
+) {
+  const rows = await db
+    .select({
+      booking: schema.bookings,
+      seatCode: schema.seats.seatCode,
+      bay: schema.seats.bay,
+      zoneCode: schema.zones.code,
+    })
+    .from(schema.bookings)
+    .innerJoin(schema.seats, eq(schema.bookings.seatId, schema.seats.id))
+    .innerJoin(schema.zones, eq(schema.seats.zoneId, schema.zones.id))
+    .where(
+      and(
+        eq(schema.seats.seatCode, seatCode),
+        eq(schema.bookings.occupantUserId, userId),
+        inArray(schema.bookings.status, ["confirmed", "checked_in", "auto_released"]),
+      ),
+    );
+
+  const opens = (startsAt: Date) => checkInOpensAt(startsAt, settings.checkInOpensMinutesBefore);
+  const live = rows.filter((r) => now >= opens(r.booking.startsAt) && now < r.booking.endsAt);
+  const chosen =
+    live.find((r) => r.booking.status === "confirmed") ??
+    live.find((r) => r.booking.status === "checked_in") ??
+    live[0];
+
+  if (!chosen) {
+    throw new BookingError(
+      "NO_BOOKING_FOR_SEAT",
+      `You do not have a booking for ${seatCode} right now.`,
+      { seatCode },
+    );
+  }
+  return chosen;
+}
+
+/* ------------------------------------------------------------------ shared */
+
+export async function loadBookingRow(db: DbLike, bookingId: string) {
+  const [row] = await db
+    .select({
+      booking: schema.bookings,
+      seatCode: schema.seats.seatCode,
+      bay: schema.seats.bay,
+      zoneCode: schema.zones.code,
+    })
+    .from(schema.bookings)
+    .innerJoin(schema.seats, eq(schema.bookings.seatId, schema.seats.id))
+    .innerJoin(schema.zones, eq(schema.seats.zoneId, schema.zones.id))
+    .where(eq(schema.bookings.id, bookingId))
+    .limit(1);
+  if (!row) {
+    throw new BookingError("BOOKING_NOT_FOUND", "That booking no longer exists.");
+  }
+  return row;
+}
