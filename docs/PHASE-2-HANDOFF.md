@@ -145,7 +145,19 @@ clickable chips in `/admin/floor-plan` so the first fifteen minutes of
 correction go exactly where detection was weakest. They are plausible, not
 verified.
 
-### The independent check that matters
+### The independent checks that matter
+
+**Three** independent sources in the drawing agree on 141:
+
+1. the per-bay `N PAX.` annotations sum to it;
+2. the furniture schedule — 93 rapid-rail workstations + 4 screen-only + 8
+   foldables + the two passage runs;
+3. the **title block** states it outright: `TOTAL WORKING PEOPLE = 141 PAX`,
+   followed by `NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED.`
+
+The build asserts (3) against the bay schedule and fails on disagreement. That
+note also settles, in the client's own words, why zone A's conference rooms are
+drawn with no bookable seats.
 
 The PAX annotations reconcile to **exactly 141** and match the Phase 1 bay
 schedule bay for bay. That schedule was read off the drawing by hand in Phase 1;
@@ -165,7 +177,7 @@ break down by wing:
 
 | Zone | Unclaimed | Explained? |
 |---|---|---|
-| A | 46 | **Yes** — 25-pax boardroom + 10-pax + 8-pax rooms + reception lounge (`RECEPTION`, `SOFA`, `CENTER TABLE`, `SWIVEL CHAIR`, and the retained-Herman-Miller sheet note all sit inside the zone A polygon) |
+| A | 46 | **Yes, and stated on the sheet** — the title block reads `TOTAL WORKING PEOPLE = 141 PAX` and, one line below, `NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED.` 25-pax boardroom + 10-pax + 8-pax rooms + reception lounge ≈ 46 |
 | C / D | 7 / 6 | Visitor and spare chairs beside the bays |
 | **B** | **33** | **No** |
 

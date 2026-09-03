@@ -257,11 +257,15 @@ class Path:
 
 
 class Span:
-    __slots__ = ("layer", "x", "y", "text", "size")
+    __slots__ = ("layer", "x", "y", "text", "size", "in_plan")
 
-    def __init__(self, layer, x, y, text, size):
+    def __init__(self, layer, x, y, text, size, in_plan):
         self.layer, self.x, self.y = layer, x, y
         self.text, self.size = text, size
+        # False for the title block and sheet notes. They are not part of the
+        # floor, but they carry the schedule -- the sheet states the 141 total
+        # and what it excludes -- so they are returned rather than discarded.
+        self.in_plan = in_plan
 
 
 def _bezier(p0, p1, p2, p3, steps=6):
@@ -416,9 +420,9 @@ def read(data, want_layers=None, want_text=True):
                 if text.strip():
                     full = mul(tm, ctm)
                     px, py = to_plan(*apply(full, 0.0, 0.0))
-                    if in_plan_box(px, py):
-                        spans.append(Span(layer, px, py, text.strip(),
-                                          font_size * (abs(full[0]) or 1.0)))
+                    spans.append(Span(layer, px, py, text.strip(),
+                                      font_size * (abs(full[0]) or 1.0),
+                                      in_plan_box(px, py)))
 
         operands = []
 

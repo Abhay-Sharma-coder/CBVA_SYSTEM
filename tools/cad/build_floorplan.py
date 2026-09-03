@@ -252,6 +252,7 @@ def find_chairs(paths, mask=None):
 
 def bay_anchors(spans):
     """Bay tag -> (x, y), plus the expected count read off the PAX annotation."""
+    spans = [s for s in spans if s.in_plan]
     tags = {}
     for s in spans:
         if BAY_RE.match(s.text) and s.layer == "F-FURNITURE TEXT":
@@ -296,6 +297,41 @@ def bay_anchors(spans):
         used.add(i)
 
     return tags, expected
+
+
+SHEET_TOTAL_RE = re.compile(r"TOTAL WORKING PEOPLE", re.I)
+PAX_ONLY_RE = re.compile(r"^(\d+)\s*PAX\.?$", re.I)
+
+
+def sheet_headcount(spans):
+    """
+    The drawing's own headline figure, from the title block:
+
+        TOTAL WORKING PEOPLE =   141 PAX
+        NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED.
+
+    This is a third, independent confirmation of 141 -- the first being the
+    per-bay PAX annotations summing to it, the second the furniture schedule.
+    It also states in the client's own words why the boardroom and conference
+    rooms are not in the count, which is the question anyone at CBVA would ask
+    first on seeing zone A drawn with no seats.
+    """
+    label = next((s for s in spans if SHEET_TOTAL_RE.search(s.text)), None)
+    if label is None:
+        return None, None
+    # The figure is set as a separate run on the same baseline.
+    best, total = None, None
+    for s in spans:
+        m = PAX_ONLY_RE.match(s.text)
+        if not m or abs(s.y - label.y) > 3.0 or s.x < label.x:
+            continue
+        d = s.x - label.x
+        if best is None or d < best:
+            best, total = d, int(m.group(1))
+    note = next(
+        (s.text for s in spans if "NOT INCLUDED" in s.text.upper()), None
+    )
+    return total, note
 
 
 def assign(chairs, anchors, capacity, max_dist=130.0):
@@ -434,7 +470,7 @@ def build_zones(mask, spans, seats):
     the drawing -- so the split is the architect's, not ours.
     """
     letters = {}
-    for s_ in spans:
+    for s_ in (s for s in spans if s.in_plan):
         if s_.text in ("A", "B", "C", "D") and s_.size > 30:
             letters[s_.text] = (s_.x, s_.y)
     if len(letters) != 4:
@@ -615,6 +651,14 @@ def main():
              if b in expected and expected[b] != SCHEDULE[b]}
     unconfirmed = sorted(b for b in SCHEDULE if b not in expected)
 
+    # ---- the sheet's own total
+    sheet_total, sheet_note = sheet_headcount(spans)
+    if sheet_total is not None and sheet_total != sum(SCHEDULE.values()):
+        raise SystemExit(
+            f"the drawing's title block says {sheet_total} working people but "
+            f"the bay schedule sums to {sum(SCHEDULE.values())}"
+        )
+
     # ---- chairs
     chairs = find_chairs(paths, mask)
     print(f"  chair blocks: {len(chairs)}", file=sys.stderr)
@@ -713,6 +757,8 @@ def main():
     dump("detection-report.json", {
         "generatedFrom": os.path.basename(a.pdf),
         "sourceSha256": checksum,
+        "sheetTotalWorkingPeople": sheet_total,
+        "sheetExclusionNote": sheet_note,
         "scheduleDrift": drift,
         "baysWithoutDrawingPax": unconfirmed,
         "seatsConfirmedByDrawingPax": sum(v for k, v in SCHEDULE.items()
@@ -753,6 +799,11 @@ def main():
           f"(25/10/8 pax rooms, reception, sofa, swivel chairs)")
     print(f"  zone B: {zone_b_chairs} chairs, 0 seats scheduled -- see "
           f"ASSUMPTIONS A16, this one is NOT explained by the drawing")
+    if sheet_total is not None:
+        print(f"the drawing's title block states TOTAL WORKING PEOPLE = "
+              f"{sheet_total} PAX, matching the bay schedule")
+    if sheet_note:
+        print(f'  and, verbatim: "{sheet_note}"')
     confirmed = sum(v for k, v in SCHEDULE.items() if k in expected)
     print(f"schedule: {confirmed}/141 seats confirmed by a PAX annotation in "
           f"the drawing; {unconfirmed} carry no PAX label and rest on the "

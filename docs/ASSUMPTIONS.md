@@ -85,16 +85,41 @@ assignment claimed 130. The 92 it did not claim break down by wing as:
 
 | Zone | Unassigned chairs | Explained? |
 |---|---|---|
-| A | 46 | **Yes** — the 25-pax boardroom, the 10-pax and 8-pax conference rooms, plus the reception lounge. The drawing labels `RECEPTION`, `SOFA`, `CENTER TABLE`, `SWIVEL CHAIR` ×2 and `3 grey + 1 black chair` in this wing, and a sheet note reads *"EXISTING HERMENMILLER CHAIRS IN BOARD ROOM TO RETAIN - 25 NOS"*. 25 + 10 + 8 = 43, plus lounge seating ≈ 46. Accounted for. |
+| A | 46 | **Yes, and the drawing says so outright** — see below. The 25-pax boardroom, the 10-pax and 8-pax conference rooms and the reception lounge. 25 + 10 + 8 = 43, plus lounge seating ≈ 46. |
 | C | 7 | Visitor and spare chairs beside the bays. |
 | D | 6 | As above. |
 | **B** | **33** | **No.** |
 
-**The hypothesis that boardroom and lounge furniture explains this is correct,
-but it lands on Zone A, not Zone B.** All of the lounge and conference
-annotations are inside the Zone A polygon (verified by point-in-polygon against
-`zones.json`, not by eye). Zone A's surplus is fully explained and needs no
-question asked.
+### The drawing settles Zone A in the client's own words
+
+The title block carries this, set immediately beneath the headline total:
+
+```
+TOTAL WORKING PEOPLE =   141 PAX
+NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED.
+```
+
+So zone A's 46 surplus chairs are not merely *inferable* as conference and
+lounge seating from their furniture type — **the architect states on the same
+sheet, one line under the 141, that the conference area is excluded from that
+count.** That is the line to quote if anyone at CBVA ever asks why a room full
+of chairs is drawn with no bookable seats.
+
+It is also a third independent confirmation of 141, alongside the per-bay PAX
+annotations summing to it and the furniture schedule (93 + 4 workstations + 8
+foldables + the passage runs). `npm run build:floorplan` now reads the title
+block and **fails** if that figure and the bay schedule ever disagree; the note
+is carried through into `detection-report.json` as `sheetExclusionNote`.
+
+The supporting furniture evidence stands too: `RECEPTION`, `SOFA`,
+`CENTER TABLE`, `SWIVEL CHAIR` ×2 and `3 grey + 1 black chair` all fall inside
+the zone A polygon, as does the sheet note *"EXISTING HERMENMILLER CHAIRS IN
+BOARD ROOM TO RETAIN - 25 NOS"* — verified by point-in-polygon against
+`zones.json` rather than by reading the layout.
+
+**Zone A therefore needs no question asked. Zone B is not covered by that note**
+— it is neither conference area nor cafeteria, and it is the only wing with
+unexplained chairs.
 
 Zone B is the upper-left wing. Its annotations are room tags `K L M Q R`, a
 `HUB ROOM`, `ELEC PANELS`, two lifts, one `CENTRE TABLE` / `SOFA` pair — and

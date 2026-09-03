@@ -89,6 +89,9 @@ export const detectedModulesSchema = z.object({
 export const detectionReportSchema = z.object({
   generatedFrom: z.string(),
   sourceSha256: z.string(),
+  /** The drawing's own headline figure, from its title block. */
+  sheetTotalWorkingPeople: z.number().int().nullable(),
+  sheetExclusionNote: z.string().nullable(),
   scheduleDrift: z.record(
     z.string(),
     z.object({ drawingPax: z.number(), schedule: z.number() }),

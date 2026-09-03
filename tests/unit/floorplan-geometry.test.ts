@@ -130,6 +130,16 @@ describe("detection report", () => {
     expect(floorplanDetectionReport.scheduleDrift).toEqual({});
   });
 
+  it("carries the drawing's own headline total and its exclusion note", () => {
+    // The title block is a third source for 141, independent of both the
+    // per-bay pax annotations and the furniture schedule. The note is what
+    // explains why zone A's conference rooms hold chairs but no seats.
+    expect(floorplanDetectionReport.sheetTotalWorkingPeople).toBe(TOTAL_SEATS);
+    expect(floorplanDetectionReport.sheetExclusionNote).toBe(
+      "NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED.",
+    );
+  });
+
   it("is explicit about which bays the drawing does not confirm", () => {
     // A1 and A2 carry no PAX annotation, so those 8 seats rest on our
     // assumption. The report must keep saying so.
