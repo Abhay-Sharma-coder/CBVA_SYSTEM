@@ -1,20 +1,35 @@
 import type { Metadata } from "next";
-import { PhaseStub } from "@/components/app-shell/phase-stub";
+
+import { FloorClient } from "@/app/floor/floor-client";
+import { floorplanDetectionReport, floorplanMeta } from "@/lib/floorplan";
 
 export const metadata: Metadata = { title: "Floor Map" };
 
 export default function Page() {
+  const interpolated = floorplanDetectionReport.bays.reduce(
+    (n, b) => n + b.interpolated,
+    0,
+  );
+
   return (
-    <PhaseStub
-      title="Floor Map"
-      phase={2}
-      summary="The interactive plan of Floor 4. Pick a bay, pick a desk, book a slot."
-      willInclude={[
-        "Real seat coordinates extracted from the Neetaara CAD drawing, replacing the temporary grid",
-        "Pan and zoom over walls, columns and glazing rendered from the CAD layers",
-        "Live seat status using the vocabulary on the style guide",
-        "Filter by zone, bay, amenity and by who is sitting where",
-      ]}
-    />
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl">Floor Map</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+          Floor 4, drawn from the architect&rsquo;s furniture layout. Pick a day
+          and a slot, then choose a desk.
+        </p>
+      </header>
+
+      <FloorClient />
+
+      <p className="text-xs text-ink-subtle">
+        Geometry extracted from {floorplanMeta.source} ·{" "}
+        {floorplanDetectionReport.bays.reduce((n, b) => n + b.detected, 0)} of 141
+        desks located automatically
+        {interpolated > 0 ? `, ${interpolated} positioned by interpolation` : null} ·
+        plan scale {floorplanMeta.mmPerUnit ? `${floorplanMeta.mmPerUnit} mm per unit` : "unresolved"}
+      </p>
+    </div>
   );
 }

@@ -27,6 +27,7 @@ import { fromZonedTime } from "date-fns-tz";
 import * as schema from "../src/lib/db/schema";
 import { makeRng, type Rng } from "../src/lib/seed-data/rng";
 import { HOLIDAYS } from "../src/lib/seed-data/holidays";
+import { floorplanSeatAnchors } from "../src/lib/floorplan";
 import { FIRST_NAMES, LAST_NAMES } from "../src/lib/seed-data/names";
 import {
   ADMIN_TEAMS,
@@ -159,38 +160,63 @@ interface SeededSeat {
   seatType: "workstation" | "passage" | "foldable" | "cabin";
   planX: string;
   planY: string;
+  rotationDeg: number;
 }
 
 /**
- * Temporary plan coordinates: bays laid out on a grid, seats in rows of 3.
- * Phase 2 overwrites both columns from the CAD extraction in tools/cad/, so no
- * effort is spent making this pretty — it exists so the columns are NOT NULL
- * and the Phase 2 swap is a data migration rather than a schema change.
+ * Seat geometry comes from the CAD extraction, not from this file.
+ *
+ * `src/data/floorplan/seats.json` is written by `npm run build:floorplan` from
+ * the architect's drawing and is the source of truth for where a desk is. The
+ * editor at /admin/floor-plan writes corrections back into it, which is why
+ * re-seeding is safe: it re-reads the same corrected file rather than
+ * flattening the floor back onto a grid.
+ *
+ * The reconciliation against BAYS is deliberate and strict. If the extraction
+ * and the bay schedule ever disagree, seeding stops rather than quietly
+ * producing a floor that is missing desks.
  */
 function buildSeats(): SeededSeat[] {
+  const anchors = new Map(
+    floorplanSeatAnchors.seats.map((a) => [a.seatCode, a] as const),
+  );
+
   const seats: SeededSeat[] = [];
-  let col = 0;
-  let row = 0;
+  const missing: string[] = [];
 
   for (const bay of BAYS) {
-    const bayX = col * 260;
-    const bayY = row * 220;
-    seatCodes(bay).forEach((code, i) => {
+    for (const code of seatCodes(bay)) {
+      const anchor = anchors.get(code);
+      if (!anchor) {
+        missing.push(code);
+        continue;
+      }
       seats.push({
         id: id("seat", code),
         seatCode: code,
         bay: bay.bay,
         zone: bay.zone,
         seatType: seatTypeForBay(bay.bay),
-        planX: (bayX + (i % 3) * 60).toFixed(2),
-        planY: (bayY + Math.floor(i / 3) * 55).toFixed(2),
+        planX: anchor.planX.toFixed(2),
+        planY: anchor.planY.toFixed(2),
+        rotationDeg: anchor.rotationDeg,
       });
-    });
-    col++;
-    if (col === 5) {
-      col = 0;
-      row++;
     }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `src/data/floorplan/seats.json has no anchor for ${missing.length} seat(s): ` +
+        `${missing.slice(0, 8).join(", ")}${missing.length > 8 ? " …" : ""}. ` +
+        "Run: npm run build:floorplan",
+    );
+  }
+  const extra = floorplanSeatAnchors.seats.length - seats.length;
+  if (extra !== 0) {
+    throw new Error(
+      `seats.json carries ${floorplanSeatAnchors.seats.length} anchors but the bay ` +
+        `schedule expects ${seats.length}. The drawing and inventory.ts have drifted.`,
+    );
   }
   return seats;
 }
@@ -347,7 +373,7 @@ async function main() {
           bay: s.bay,
           planX: s.planX,
           planY: s.planY,
-          rotationDeg: 0,
+          rotationDeg: s.rotationDeg,
           seatType: s.seatType,
           status: "bookable" as const,
           amenities:
@@ -366,6 +392,7 @@ async function main() {
           bay: sql`excluded.bay`,
           planX: sql`excluded.plan_x`,
           planY: sql`excluded.plan_y`,
+          rotationDeg: sql`excluded.rotation_deg`,
           seatType: sql`excluded.seat_type`,
           amenities: sql`excluded.amenities`,
         },

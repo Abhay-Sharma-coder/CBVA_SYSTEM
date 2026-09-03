@@ -1,0 +1,132 @@
+"use client";
+
+import { memo } from "react";
+import { motion } from "motion/react";
+
+import { SEAT_STATUS_TOKENS } from "@/components/seat/seat-status";
+import type { FloorPlanSeat } from "@/components/floor-plan/types";
+import { PLAN_BOUNDS } from "@/lib/floorplan";
+import { cn } from "@/lib/utils";
+
+/**
+ * One seat on the plan.
+ *
+ * A real <button>, so it is keyboard reachable, gets the global focus ring and
+ * announces itself, rather than an SVG shape wearing role="button".
+ *
+ * It takes its colour, border treatment and glyph straight from
+ * SEAT_STATUS_TOKENS. There is no second colour map anywhere in Phase 2 — the
+ * greyscale and colour-blind guarantee proven on /styleguide only holds
+ * because that table has exactly one consumer vocabulary.
+ */
+interface SeatMarkerProps {
+  seat: FloorPlanSeat;
+  /** Rendered size in CSS pixels, before the layer's scale is applied. */
+  sizePx: number;
+  /** The layer's current scale, so the marker can hold a constant screen size. */
+  scale: number;
+  isFocused: boolean;
+  isDimmed: boolean;
+  reduceMotion: boolean;
+  tabIndex: number;
+  onActivate: (seat: FloorPlanSeat) => void;
+  onFocus: (seat: FloorPlanSeat) => void;
+  onBlur: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>, seat: FloorPlanSeat) => void;
+}
+
+function SeatMarkerImpl({
+  seat,
+  sizePx,
+  scale,
+  isFocused,
+  isDimmed,
+  reduceMotion,
+  tabIndex,
+  onActivate,
+  onFocus,
+  onBlur,
+  onKeyDown,
+}: SeatMarkerProps) {
+  const token = SEAT_STATUS_TOKENS[seat.status];
+  // Markers hold a constant on-screen size, so a seat stays hittable when the
+  // whole cruciform is framed and does not become a billboard when zoomed in.
+  const unit = sizePx / scale;
+  const showCode = sizePx >= 26;
+
+  const label = [
+    `Seat ${seat.seatCode}`,
+    `Zone ${seat.zone}`,
+    `bay ${seat.bay}`,
+    token.srLabel,
+    seat.occupantName ? `— ${seat.occupantName}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <motion.button
+      type="button"
+      data-seat={seat.seatCode}
+      data-status={seat.status}
+      data-zone={seat.zone}
+      data-bay={seat.bay}
+      tabIndex={tabIndex}
+      disabled={!token.interactive}
+      aria-label={label}
+      aria-disabled={!token.interactive}
+      onClick={() => onActivate(seat)}
+      onFocus={() => onFocus(seat)}
+      onBlur={onBlur}
+      onPointerEnter={() => onFocus(seat)}
+      onPointerLeave={onBlur}
+      onKeyDown={(e) => onKeyDown(e, seat)}
+      className={cn(
+        "absolute flex items-center justify-center rounded-sm p-0 leading-none",
+        "focus-visible:z-20",
+        token.className,
+        token.interactive ? "cursor-pointer" : "cursor-default",
+        isDimmed && "opacity-25",
+      )}
+      style={{
+        left: seat.planX - PLAN_BOUNDS.x,
+        top: seat.planY - PLAN_BOUNDS.y,
+        width: unit,
+        height: unit,
+        marginLeft: -unit / 2,
+        marginTop: -unit / 2,
+        fontSize: Math.max(5, unit * 0.34),
+        zIndex: isFocused ? 15 : 10,
+      }}
+      // A spring, not an ease — the seat should feel like it is being picked
+      // up. Kept short so it never gets in the way of a fast booking.
+      animate={{
+        scale: reduceMotion ? 1 : isFocused ? 1.35 : 1,
+        rotate: seat.rotationDeg,
+      }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : { type: "spring", stiffness: 520, damping: 26, mass: 0.5 }
+      }
+    >
+      {showCode ? (
+        <span
+          className="seat-code font-medium"
+          aria-hidden="true"
+          // The plan is rotated with the wings; the label is not, or half the
+          // floor would read upside down.
+          style={{ transform: `rotate(${-seat.rotationDeg}deg)` }}
+        >
+          {seat.seatCode.split("-")[1]}
+        </span>
+      ) : token.glyph ? (
+        <span aria-hidden="true" style={{ transform: `rotate(${-seat.rotationDeg}deg)` }}>
+          {token.glyph}
+        </span>
+      ) : null}
+    </motion.button>
+  );
+}
+
+export const SeatMarker = memo(SeatMarkerImpl);
