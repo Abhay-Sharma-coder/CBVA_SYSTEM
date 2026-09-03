@@ -1,40 +1,12 @@
+/**
+ * The seed inventory reconciliation.
+ *
+ * `deriveSlotBounds` and the slot vocabulary moved to booking-rules.test.ts in
+ * Phase 3, when slots stopped being a two-value type and became settings data —
+ * they belong beside the cut-off and the rest of the rules that read them.
+ */
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SLOT_DEFINITIONS, deriveSlotBounds } from "@/lib/slots";
 import { BAYS, FIXED_SEAT_ALLOCATION, HEADCOUNT, TOTAL_HEADCOUNT, TOTAL_SEATS, seatCodes } from "@/lib/seed-data/inventory";
-
-describe("deriveSlotBounds", () => {
-  it("converts Asia/Kolkata wall time to UTC", () => {
-    // IST is UTC+5:30, so a 09:00 local start is 03:30Z.
-    const { startsAt, endsAt } = deriveSlotBounds("2026-09-03", "AM");
-    expect(startsAt.toISOString()).toBe("2026-09-03T03:30:00.000Z");
-    expect(endsAt.toISOString()).toBe("2026-09-03T08:00:00.000Z");
-  });
-
-  it("gives PM a start that abuts the AM end", () => {
-    const am = deriveSlotBounds("2026-09-03", "AM");
-    const pm = deriveSlotBounds("2026-09-03", "PM");
-    expect(pm.startsAt.toISOString()).toBe(am.endsAt.toISOString());
-    expect(pm.endsAt.toISOString()).toBe("2026-09-03T13:30:00.000Z");
-  });
-
-  it("always produces a positive-length range", () => {
-    for (const date of ["2026-01-01", "2026-06-15", "2026-12-31"]) {
-      for (const slot of ["AM", "PM"] as const) {
-        const { startsAt, endsAt } = deriveSlotBounds(date, slot);
-        expect(endsAt.getTime()).toBeGreaterThan(startsAt.getTime());
-      }
-    }
-  });
-
-  it("honours a custom slot definition", () => {
-    const custom = {
-      ...DEFAULT_SLOT_DEFINITIONS,
-      AM: { label: "Early", start: "08:00", end: "12:00" },
-    };
-    const { startsAt } = deriveSlotBounds("2026-09-03", "AM", custom);
-    expect(startsAt.toISOString()).toBe("2026-09-03T02:30:00.000Z");
-  });
-});
 
 /**
  * The seed inventory has to reconcile against the CAD drawing exactly. If a bay

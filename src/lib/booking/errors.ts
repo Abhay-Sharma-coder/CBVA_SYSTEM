@@ -94,14 +94,33 @@ interface PgLikeError {
 }
 
 /**
+ * Digs the real Postgres error out of whatever wrapped it.
+ *
+ * Drizzle raises a `DrizzleQueryError` carrying the driver's error on `.cause`,
+ * so the SQLSTATE and constraint name are one or more levels down. Reading the
+ * top-level object finds neither, which turns "somebody just took that desk"
+ * into an unhandled 500 — a failure mode that only shows up under the exact
+ * concurrency the constraints exist for.
+ */
+function unwrapPgError(err: unknown): PgLikeError | null {
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    const candidate = current as PgLikeError & { cause?: unknown };
+    if (typeof candidate.code === "string" && candidate.code.length > 0) return candidate;
+    current = candidate.cause;
+  }
+  return null;
+}
+
+/**
  * Turns a Postgres integrity violation into the outcome it actually represents.
  *
  * Returns null for anything it does not recognise, so a genuine bug still
  * surfaces as a 500 rather than being dressed up as a booking conflict.
  */
 export function mapPgError(err: unknown): BookingError | null {
-  const e = err as PgLikeError;
-  if (!e || typeof e !== "object") return null;
+  const e = unwrapPgError(err);
+  if (!e) return null;
 
   if (e.code === "23505" && e.constraint === "seat_slot_unique") {
     return new BookingError(
@@ -131,4 +150,9 @@ export function mapPgError(err: unknown): BookingError | null {
 export function rethrowMapped(err: unknown): never {
   const mapped = mapPgError(err);
   throw mapped ?? err;
+}
+
+/** The SQLSTATE and constraint of a database error, wrapper or not. */
+export function pgErrorInfo(err: unknown): PgLikeError | null {
+  return unwrapPgError(err);
 }

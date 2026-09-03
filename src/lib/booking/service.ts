@@ -25,7 +25,7 @@ import {
   assertMayMutateBooking,
   assertSeatBookable,
 } from "@/lib/booking/authorise";
-import { BookingError, rethrowMapped } from "@/lib/booking/errors";
+import { BookingError, pgErrorInfo, rethrowMapped } from "@/lib/booking/errors";
 import {
   assertBeforeCutoff,
   assertDateBookable,
@@ -42,6 +42,48 @@ import { deriveSlotBounds, type SlotDefinition } from "@/lib/slots";
 
 /** Booking states that hold a desk, i.e. the partial unique index predicate. */
 export const ACTIVE_BOOKING_STATUSES = ["confirmed", "checked_in"] as const;
+
+/** Statuses reached because a PERSON acted, as opposed to the job settling a row. */
+const CANCELLED_BY_SOMEBODY: ReadonlySet<string> = new Set([
+  "cancelled_by_user",
+  "cancelled_after_check_in",
+  "cancelled_by_admin",
+]);
+
+/**
+ * Why a write found no row to change, phrased for the person who attempted it.
+ *
+ * The distinction is real and worth getting right. A booking the SYSTEM ended —
+ * auto-released for want of a check-in, or settled when its slot finished — is
+ * over, and "reload and try again" would be a lie. A booking somebody else
+ * cancelled or moved is a conflict, and reloading is exactly the fix.
+ *
+ * Note what this implies about the optimistic lock. `updated_at` cannot
+ * distinguish two writes that land inside the same clock tick — under a frozen
+ * demo clock, every write shares an instant. The lock is a courtesy that gets
+ * the message right in the common case; the thing that actually makes
+ * concurrent edits safe is the conditional UPDATE inside the transaction, which
+ * matches zero rows once somebody else has moved the booking out of an active
+ * status. That is why both exist.
+ */
+function staleBookingError(status: string): BookingError {
+  if (CANCELLED_BY_SOMEBODY.has(status)) {
+    return new BookingError(
+      "BOOKING_CONFLICT",
+      "This booking was changed or cancelled while you had it open. It has been reloaded — please check it and try again.",
+    );
+  }
+  if (status === "auto_released") {
+    return new BookingError(
+      "BOOKING_NOT_ACTIVE",
+      "That desk was released because nobody checked in, so the booking no longer exists. Book another desk from the floor plan.",
+    );
+  }
+  return new BookingError(
+    "BOOKING_NOT_ACTIVE",
+    "That booking has already finished, so it cannot be changed.",
+  );
+}
 
 export type CheckInMethod = "qr" | "badge" | "app" | "admin";
 
@@ -192,9 +234,25 @@ export async function createBooking(
     settings.timezone,
   );
 
-  // A booking whose cut-off has already passed cannot be made either — booking
-  // a desk five minutes before a slot you can no longer cancel is a trap.
-  assertBeforeCutoff(now, startsAt, settings.cutoffMinutes, settings.timezone);
+  /**
+   * THE CUT-OFF DOES NOT GATE CREATION, deliberately.
+   *
+   * The brief defines it as "past the cut-off, edit and cancel are disabled".
+   * Extending it to booking would break the two cases the product most needs to
+   * support: somebody who came in unexpectedly and wants a desk this morning,
+   * and somebody whose desk was just auto-released being told to "book another
+   * desk from the floor plan" by an email they cannot act on.
+   *
+   * What IS refused is a slot that has already finished. Booking a desk for an
+   * afternoon that is over is not a booking, it is a data-entry error, and it
+   * would land in the occupancy figures as a desk somebody held.
+   */
+  if (now >= endsAt) {
+    throw new BookingError(
+      "DATE_OUTSIDE_WINDOW",
+      `The ${slot.label.toLowerCase()} slot on ${input.bookingDate} has already finished.`,
+    );
+  }
 
   try {
     return await ctx.db.transaction(async (tx) => {
@@ -290,7 +348,7 @@ async function decorateOccupantConflict(
   bookingDate: string,
   slot: string,
 ): Promise<void> {
-  const e = err as { code?: string; constraint?: string };
+  const e = pgErrorInfo(err);
   if (e?.code !== "23505" || e?.constraint !== "occupant_slot_unique") return;
   const existing = await explainOccupantConflict(db, occupantUserId, bookingDate, slot);
   throw new BookingError(
@@ -334,11 +392,25 @@ export async function editBooking(
   const existing = await loadBookingRow(ctx.db, input.bookingId);
   assertMayMutateBooking(ctx.actor, existing.booking);
 
-  if (!(["confirmed", "checked_in"] as string[]).includes(existing.booking.status)) {
+  /**
+   * The optimistic lock, checked here as well as inside the transaction.
+   *
+   * Both checks are needed and they say different things. This one turns "the
+   * version you were looking at is not the current one" into a CONFLICT, which
+   * tells the user to reload — whereas the status check below would report the
+   * same situation as "no longer active", which sounds like the booking ended
+   * rather than like somebody else moved it. The in-transaction check is the
+   * one that actually closes the race; this one gets the message right.
+   */
+  if (existing.booking.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) {
     throw new BookingError(
-      "BOOKING_NOT_ACTIVE",
-      "That booking is no longer active, so it cannot be changed.",
+      "BOOKING_CONFLICT",
+      "Somebody else changed this booking while you had it open. It has been reloaded — please check it and try again.",
     );
+  }
+
+  if (!(["confirmed", "checked_in"] as string[]).includes(existing.booking.status)) {
+    throw staleBookingError(existing.booking.status);
   }
 
   // Both ends of the move are gated: you may not escape a closed slot, and you
@@ -404,10 +476,15 @@ export async function editBooking(
         .returning({ id: schema.bookings.id });
 
       if (cancelled.length === 0) {
-        throw new BookingError(
-          "BOOKING_CONFLICT",
-          "Somebody else changed this booking while you had it open. It has been reloaded — please check it and try again.",
-        );
+        // Somebody committed between the read above and this statement. Read
+        // the row back so the message says what actually happened rather than
+        // guessing.
+        const [now_] = await tx
+          .select({ status: schema.bookings.status })
+          .from(schema.bookings)
+          .where(eq(schema.bookings.id, input.bookingId))
+          .limit(1);
+        throw staleBookingError(now_?.status ?? "cancelled_by_user");
       }
 
       const [booking] = await tx
@@ -507,10 +584,21 @@ export async function cancelBooking(
   assertMayMutateBooking(ctx.actor, existing.booking);
 
   if (!(["confirmed", "checked_in"] as string[]).includes(existing.booking.status)) {
-    throw new BookingError("BOOKING_NOT_ACTIVE", "That booking has already ended.");
+    throw staleBookingError(existing.booking.status);
   }
 
-  if (!input.force) {
+  /**
+   * THE CUT-OFF DOES NOT APPLY ONCE SOMEBODY HAS CHECKED IN.
+   *
+   * The cut-off exists to stop a desk being dropped so late that nobody else
+   * can pick it up. Somebody who has checked in and is now leaving is the
+   * opposite situation: releasing the desk gives the rest of the slot back to
+   * the floor, which is exactly what the product wants. Refusing it would also
+   * make edge case 5 impossible, since check-in only happens after the slot has
+   * started and therefore always after the cut-off.
+   */
+  const alreadyCheckedIn = existing.booking.status === "checked_in";
+  if (!input.force && !alreadyCheckedIn) {
     assertBeforeCutoff(now, existing.booking.startsAt, settings.cutoffMinutes, settings.timezone);
   }
 
@@ -525,7 +613,7 @@ export async function cancelBooking(
    */
   const status = input.byAdmin
     ? "cancelled_by_admin"
-    : existing.booking.status === "checked_in"
+    : alreadyCheckedIn
       ? "cancelled_after_check_in"
       : "cancelled_by_user";
 
@@ -554,10 +642,12 @@ export async function cancelBooking(
       .returning();
 
     if (rows.length === 0) {
-      throw new BookingError(
-        "BOOKING_CONFLICT",
-        "That booking changed while you were looking at it. It has been reloaded.",
-      );
+      const [now_] = await tx
+        .select({ status: schema.bookings.status })
+        .from(schema.bookings)
+        .where(eq(schema.bookings.id, input.bookingId))
+        .limit(1);
+      throw staleBookingError(now_?.status ?? "cancelled_by_user");
     }
 
     const occupant = await userById(tx, existing.booking.occupantUserId);
