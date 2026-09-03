@@ -1,26 +1,187 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   CBVA Workspace — design tokens.
+
+   THIS BLOCK IS THE WHOLE PALETTE. Swap the eight raw values below and the
+   entire product re-skins. Nothing else in the codebase hard-codes a colour.
+
+   The brief's constraints, restated because they are easy to erode:
+     · gold is an ACCENT ONLY — a focused seat, an active tab underline, one key
+       metric. Never a fill, never a primary button. Target under 5% of pixels.
+     · border radius maxes out at 4px.
+     · borders are 1px hairlines.
+     · no gradients, no glassmorphism, no shadow heavier than a 1px hairline.
+   This is a chartered accountancy firm, not consumer SaaS.
+   ========================================================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ---- raw palette, from the CBVA logo and letterhead ---- */
+  --cbva-navy: #1e2a5a;
+  --cbva-gold: #d9a34a;
+  --cbva-paper: #fbfaf7;
+  --cbva-ink: #14181f;
+  --cbva-hairline: #e4e0d9;
+
+  /* ---- derived neutrals, all mixed from the five above ---- */
+  --cbva-navy-tint: color-mix(in srgb, var(--cbva-navy) 8%, var(--cbva-paper));
+  --cbva-navy-tint-strong: color-mix(in srgb, var(--cbva-navy) 14%, var(--cbva-paper));
+  --cbva-ink-muted: color-mix(in srgb, var(--cbva-ink) 62%, var(--cbva-paper));
+  --cbva-ink-subtle: color-mix(in srgb, var(--cbva-ink) 42%, var(--cbva-paper));
+  --cbva-surface: #ffffff;
+  --cbva-surface-sunken: color-mix(in srgb, var(--cbva-hairline) 32%, var(--cbva-paper));
+
+  /* ---- semantic status, kept desaturated so gold stays the loudest thing ---- */
+  --cbva-positive: #2f6b4f;
+  --cbva-caution: #8a6414;
+  --cbva-danger: #8f2f2a;
+
+  /* ---- seat status. Colour is the SECONDARY cue everywhere; the primary cue
+         is the border treatment + glyph carried by SeatSwatch. ---- */
+  --seat-available-fill: var(--cbva-paper);
+  --seat-available-line: var(--cbva-navy);
+  --seat-booked-fill: var(--cbva-navy-tint);
+  --seat-booked-line: var(--cbva-navy);
+  --seat-yours-fill: var(--cbva-navy-tint-strong);
+  --seat-yours-line: var(--cbva-gold);
+  --seat-fixed-fill: var(--cbva-surface-sunken);
+  --seat-fixed-line: var(--cbva-ink-subtle);
+  --seat-checkedin-fill: var(--cbva-navy);
+  --seat-checkedin-line: var(--cbva-navy);
+  --seat-released-fill: var(--cbva-paper);
+  --seat-released-line: var(--cbva-caution);
+  --seat-blocked-fill: var(--cbva-surface-sunken);
+  --seat-blocked-line: var(--cbva-ink);
+
+  /* ---- geometry ---- */
+  --cbva-radius: 4px;
+  --cbva-radius-sm: 2px;
+  --cbva-hairline-width: 1px;
+
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-navy: var(--cbva-navy);
+  --color-gold: var(--cbva-gold);
+  --color-paper: var(--cbva-paper);
+  --color-ink: var(--cbva-ink);
+  --color-hairline: var(--cbva-hairline);
+
+  --color-navy-tint: var(--cbva-navy-tint);
+  --color-navy-tint-strong: var(--cbva-navy-tint-strong);
+  --color-ink-muted: var(--cbva-ink-muted);
+  --color-ink-subtle: var(--cbva-ink-subtle);
+  --color-surface: var(--cbva-surface);
+  --color-surface-sunken: var(--cbva-surface-sunken);
+
+  --color-positive: var(--cbva-positive);
+  --color-caution: var(--cbva-caution);
+  --color-danger: var(--cbva-danger);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Radius stops at 4px. There is deliberately no --radius-lg. */
+  --radius-sm: var(--cbva-radius-sm);
+  --radius-md: var(--cbva-radius);
+  --radius-lg: var(--cbva-radius);
+  --radius-xl: var(--cbva-radius);
+
+  /* The only two shadows in the system. Both are hairlines, not drop shadows. */
+  --shadow-hairline: 0 1px 0 0 var(--cbva-hairline);
+  --shadow-hairline-inset: inset 0 -1px 0 0 var(--cbva-hairline);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--cbva-hairline);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--cbva-paper);
+    color: var(--cbva-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Page titles only. The serif echoes the engraved wordmark; using it for
+     anything else immediately makes the product look like a wedding invitation. */
+  h1,
+  h2,
+  .font-title {
+    font-family: var(--font-serif);
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: balance;
+  }
+
+  /* Seat codes, bay labels and plan annotations. Nothing else. */
+  .seat-code {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  /* Number columns must line up — this is a firm that reads tables for a living. */
+  .tabular,
+  td.numeric,
+  th.numeric {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cbva-navy);
+    outline-offset: 2px;
+    border-radius: var(--cbva-radius-sm);
+  }
+
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+
+  ::selection {
+    background-color: var(--cbva-navy-tint-strong);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  /* Blocked seats: a hatch, so the status survives greyscale printing and
+     colour-vision deficiency without relying on hue. */
+  .hatch {
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--cbva-ink-subtle) 0 1px,
+      transparent 1px 5px
+    );
+  }
+
+  .hairline-b {
+    box-shadow: var(--shadow-hairline);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

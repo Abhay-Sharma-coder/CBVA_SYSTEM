@@ -26,7 +26,7 @@ export interface Clock {
 /** Real time. Production. */
 export class SystemClock implements Clock {
   now(): Date {
-    // eslint-disable-next-line no-restricted-syntax -- the one sanctioned read.
+    // The one sanctioned read of the system clock in the entire codebase.
     return new Date();
   }
 }
