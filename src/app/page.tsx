@@ -1,103 +1,227 @@
-import Image from "next/image";
+import Link from "next/link";
+import { count, eq, sql } from "drizzle-orm";
+import { db, schema } from "@/lib/db";
+import { getClock } from "@/lib/clock";
+import { auth } from "@/lib/adapters";
+import { APP_TIMEZONE } from "@/lib/config";
+import { Card, CardBody, CardHeader, CardTitle, Badge } from "@/components/ui/primitives";
+import { Button } from "@/components/ui/button";
+import { GRADE_LABEL } from "@/lib/seed-data/inventory";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+const dateFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: APP_TIMEZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+/**
+ * Phase 1 landing page. Deliberately thin — it exists to prove the shell, the
+ * adapters, the clock and the seed are all wired to each other. The numbers are
+ * real reads against the seeded database, not placeholders.
+ */
+export default async function HomePage() {
+  const clock = await getClock();
+  const now = clock.now();
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TIMEZONE }).format(now);
+
+  const user = await auth().currentUser();
+
+  const [inventory] = await db()
+    .select({
+      total: count(),
+      bookable: sql<number>`count(*) filter (where ${schema.seats.status} = 'bookable')`,
+      fixed: sql<number>`count(*) filter (where ${schema.seats.status} = 'fixed')`,
+      blocked: sql<number>`count(*) filter (where ${schema.seats.status} = 'blocked')`,
+    })
+    .from(schema.seats);
+
+  const [todayStats] = await db()
+    .select({
+      booked: sql<number>`count(distinct ${schema.bookings.seatId}) filter (where ${schema.bookings.status} in ('confirmed','checked_in','completed'))`,
+      people: sql<number>`count(distinct ${schema.bookings.occupantUserId}) filter (where ${schema.bookings.status} in ('confirmed','checked_in','completed'))`,
+      checkedIn: sql<number>`count(distinct ${schema.bookings.seatId}) filter (where ${schema.bookings.status} = 'checked_in')`,
+    })
+    .from(schema.bookings)
+    .where(eq(schema.bookings.bookingDate, todayIso));
+
+  const [headcount] = await db()
+    .select({
+      total: count(),
+      bookableStaff: sql<number>`count(*) filter (where ${schema.users.seatMode} = 'bookable')`,
+    })
+    .from(schema.users);
+
+  const bookable = Number(inventory?.bookable ?? 0);
+  const bookedToday = Number(todayStats?.booked ?? 0);
+  const utilisation = bookable > 0 ? Math.round((bookedToday / bookable) * 100) : 0;
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="space-y-8">
+      <section>
+        <p className="text-xs tracking-wide text-ink-subtle uppercase">
+          {dateFormatter.format(now)}
+        </p>
+        <h1 className="mt-1 text-3xl text-ink">
+          {user ? `Good day, ${user.displayName.split(" ")[0]}.` : "Workspace"}
+        </h1>
+        <p className="mt-2 max-w-prose text-sm text-ink-muted">
+          {user ? (
+            <>
+              You are signed in as{" "}
+              <strong className="font-medium text-ink">
+                {GRADE_LABEL[user.grade]}
+              </strong>
+              {user.team ? `, ${user.team}` : null}.{" "}
+              {user.seatMode === "fixed"
+                ? "You have an allocated seat, so you do not need to book."
+                : "You book a seat for each day you come in."}
+            </>
+          ) : (
+            "No one is signed in. Pick a person from the role switcher."
+          )}
+        </p>
+      </section>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+      <section aria-labelledby="today-heading">
+        <h2 id="today-heading" className="sr-only">
+          Today at a Glance
+        </h2>
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-hairline bg-hairline lg:grid-cols-4">
+          <Stat
+            label="Seats Occupied Today"
+            value={String(bookedToday)}
+            hint={`of ${bookable} bookable`}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+          {/* The one gold-accented number on the page: the metric partners
+              actually care about. */}
+          <Stat label="Utilisation" value={`${utilisation}%`} accent />
+          <Stat
+            label="Checked In Now"
+            value={String(Number(todayStats?.checkedIn ?? 0))}
+            hint="via badge"
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
+          <Stat
+            label="Headcount"
+            value={String(Number(headcount?.total ?? 0))}
+            hint={`${Number(headcount?.bookableStaff ?? 0)} must book`}
           />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        </dl>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-3" aria-labelledby="phase-heading">
+        <h2 id="phase-heading" className="sr-only">
+          Build Status
+        </h2>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>What Is Built</CardTitle>
+          </CardHeader>
+          <CardBody className="space-y-3 text-sm text-ink-muted">
+            <p className="max-w-prose">
+              Phase 1 is the foundation: schema, database-enforced booking
+              constraints, the clock service, the integration adapters, and a
+              seeded floor of {Number(inventory?.total ?? 0)} desks with eight
+              weeks of booking history behind it.
+            </p>
+            <ul className="space-y-1.5">
+              <PhaseRow phase="1" label="Foundation" state="done" />
+              <PhaseRow phase="2" label="CAD Pipeline & 2D Floor Plan" state="next" />
+              <PhaseRow phase="3" label="Booking Engine, Rooms, Auto-Release" state="todo" />
+              <PhaseRow phase="4" label="3D Floor Plan" state="todo" />
+              <PhaseRow phase="5" label="Admin Analytics & Deploy" state="todo" />
+            </ul>
+            <div className="pt-2">
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/styleguide">Open the Style Guide</Link>
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Floor 4 Inventory</CardTitle>
+          </CardHeader>
+          <CardBody>
+            <dl className="space-y-2 text-sm">
+              <InventoryRow label="Total Desks" value={Number(inventory?.total ?? 0)} />
+              <InventoryRow label="Bookable" value={bookable} />
+              <InventoryRow label="Fixed Allocation" value={Number(inventory?.fixed ?? 0)} />
+              <InventoryRow label="Blocked" value={Number(inventory?.blocked ?? 0)} />
+            </dl>
+            <p className="mt-4 border-t border-hairline pt-3 text-xs text-ink-subtle">
+              Seat positions are on a temporary grid. Phase 2 replaces them with
+              coordinates extracted from the CAD drawing.
+            </p>
+          </CardBody>
+        </Card>
+      </section>
     </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="bg-surface px-5 py-4">
+      <dt className="text-xs tracking-wide text-ink-muted uppercase">{label}</dt>
+      <dd className="mt-1.5 flex items-baseline gap-2">
+        <span
+          className={
+            accent
+              ? "border-b-2 border-gold pb-0.5 text-2xl leading-none font-semibold tabular text-ink"
+              : "text-2xl leading-none font-semibold tabular text-ink"
+          }
+        >
+          {value}
+        </span>
+        {hint ? <span className="text-xs text-ink-subtle">{hint}</span> : null}
+      </dd>
+    </div>
+  );
+}
+
+function InventoryRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-ink-muted">{label}</dt>
+      <dd className="tabular font-medium text-ink">{value}</dd>
+    </div>
+  );
+}
+
+function PhaseRow({
+  phase,
+  label,
+  state,
+}: {
+  phase: string;
+  label: string;
+  state: "done" | "next" | "todo";
+}) {
+  return (
+    <li className="flex items-center gap-3">
+      <span className="seat-code w-4 text-xs text-ink-subtle">{phase}</span>
+      <span className={state === "todo" ? "text-ink-subtle" : "text-ink"}>{label}</span>
+      {state === "done" ? (
+        <Badge variant="positive">Complete</Badge>
+      ) : state === "next" ? (
+        <Badge variant="navy">Next</Badge>
+      ) : null}
+    </li>
   );
 }

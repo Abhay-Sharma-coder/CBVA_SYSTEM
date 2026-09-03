@@ -26,8 +26,10 @@
   /* ---- derived neutrals, all mixed from the five above ---- */
   --cbva-navy-tint: color-mix(in srgb, var(--cbva-navy) 8%, var(--cbva-paper));
   --cbva-navy-tint-strong: color-mix(in srgb, var(--cbva-navy) 14%, var(--cbva-paper));
-  --cbva-ink-muted: color-mix(in srgb, var(--cbva-ink) 62%, var(--cbva-paper));
-  --cbva-ink-subtle: color-mix(in srgb, var(--cbva-ink) 42%, var(--cbva-paper));
+  --cbva-ink-muted: color-mix(in srgb, var(--cbva-ink) 72%, var(--cbva-paper));
+  /* 58% keeps tertiary text above 4.5:1 on paper — these carry real
+     information (timestamps, seat counts), not decoration. */
+  --cbva-ink-subtle: color-mix(in srgb, var(--cbva-ink) 58%, var(--cbva-paper));
   --cbva-surface: #ffffff;
   --cbva-surface-sunken: color-mix(in srgb, var(--cbva-hairline) 32%, var(--cbva-paper));
 

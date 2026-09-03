@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { SystemClock } from "@/lib/clock";
 import type {
@@ -14,9 +14,6 @@ import type { BadgeEvent, RoomBooking, User } from "@/lib/db/schema";
 /** Cookie the role switcher writes. Value is a seeded user's email. */
 export const ROLE_COOKIE = "cbva_role";
 
-/** Who you are when no cookie is set — a partner, so the shell has full nav. */
-export const DEFAULT_DEMO_EMAIL = "priya.deshmukh@cbva.in";
-
 /**
  * Demo auth: returns whichever seeded user the role switcher cookie names.
  * Real sign-in is Entra ID; see production.ts.
@@ -24,21 +21,39 @@ export const DEFAULT_DEMO_EMAIL = "priya.deshmukh@cbva.in";
 export class DemoAuthProvider implements AuthProvider {
   async currentUser(): Promise<User | null> {
     const jar = await cookies();
-    const email = jar.get(ROLE_COOKIE)?.value ?? DEFAULT_DEMO_EMAIL;
-    const [user] = await db()
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.email, email))
-      .limit(1);
-    if (user) return user;
+    const email = jar.get(ROLE_COOKIE)?.value;
 
-    // The cookie names someone who is not seeded (stale cookie, reseeded db).
-    const [fallback] = await db()
+    if (email) {
+      const [user] = await db()
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.email, email))
+        .limit(1);
+      if (user) return user;
+      // Fall through: stale cookie, or the database was reseeded under it.
+    }
+
+    // No cookie, or it named nobody. Resolve a default from the seed rather
+    // than hard-coding an address — seeded names are generated, so any literal
+    // here silently rots the moment the roster changes.
+    return this.defaultUser();
+  }
+
+  private async defaultUser(): Promise<User | null> {
+    const [admin] = await db()
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, DEFAULT_DEMO_EMAIL))
+      .where(eq(schema.users.isAdmin, true))
+      .orderBy(asc(schema.users.email))
       .limit(1);
-    return fallback ?? null;
+    if (admin) return admin;
+
+    const [anyone] = await db()
+      .select()
+      .from(schema.users)
+      .orderBy(asc(schema.users.email))
+      .limit(1);
+    return anyone ?? null;
   }
 }
 
