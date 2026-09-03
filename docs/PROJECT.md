@@ -146,6 +146,10 @@ the same store and the same status vocabulary. `walls.json` is 252 pre-simplifie
 polygons ready to extrude, and `meta.json.mmPerUnit` converts to real dimensions.
 
 **Phase 5 — Admin analytics and deploy**
+⚠️ The headline number — peak observed occupancy against the bookable pool —
+cannot be finalised until **A1** and **A16** close; together they fix its
+denominator. Phases 3 and 4 are not blocked by either.
+
 The actual product: occupancy by day, zone, team and bay; desks held versus
 desks needed; no-show reporting; seat inventory management; the notification
 outbox. Full accessibility pass. Deploy.
@@ -161,7 +165,10 @@ See `ASSUMPTIONS.md`. The four that block real use:
    Now visible: the plan draws 47 specific desks as reserved, in their real
    positions.
 3. **The real meeting rooms** — names, capacities and Outlook resource mailboxes.
-4. **Does anybody sit in Zone B?** Phase 2 detected 32 chairs in a wing the
-   drawing marks "NO CHANGE AREA" and gives no pax count. If they are occupied,
-   the floor holds ~173 desks rather than 141 and every occupancy figure is
-   overstated by roughly 19%.
+4. **Does anybody sit in Zone B?** Phase 2 detected 33 unclaimed chairs in the
+   north-west wing, which the drawing marks "NO CHANGE AREA", labels "MODULAR
+   FURNITURE" and gives no pax count. Zone A's 46 unclaimed chairs *are*
+   explained — boardroom, conference rooms and reception lounge — but Zone B's
+   are not. If those are staff desks the bookable pool is 115–126 rather than
+   93, so utilisation is overstated by 24–36% relative. Full derivation in
+   ASSUMPTIONS A16.

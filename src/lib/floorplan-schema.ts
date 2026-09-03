@@ -98,6 +98,7 @@ export const detectionReportSchema = z.object({
   zoneBChairsDetected: z.number().int(),
   zoneBExpected: z.number().int(),
   unassignedChairs: z.number().int(),
+  unassignedChairsByZone: z.record(z.string(), z.number().int()),
   bays: z.array(
     z.object({
       bay: z.string(),

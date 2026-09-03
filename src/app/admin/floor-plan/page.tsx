@@ -109,10 +109,18 @@ export default async function Page() {
             </tbody>
           </Table>
           <p className="mt-3 text-xs text-ink-muted">
-            Zone B has {report.zoneBChairsDetected} chairs in the drawing but no
-            scheduled seats: the architect marked that wing &ldquo;NO CHANGE AREA — ONLY
-            REPAIR WORK&rdquo; and gave it no pax annotation. Whether those desks are
-            occupied is an open question with CBVA.
+            The extraction found {report.unassignedChairs} chairs it could not
+            assign to a scheduled seat, by zone:{" "}
+            {Object.entries(report.unassignedChairsByZone)
+              .map(([z, n]) => `${z} ${n}`)
+              .join(" · ")}
+            . Zone A&rsquo;s are the boardroom, conference rooms and reception
+            lounge, so they are accounted for. Zone B&rsquo;s{" "}
+            {report.zoneBChairsDetected} are not: that wing is marked &ldquo;NO
+            CHANGE AREA — ONLY REPAIR WORK&rdquo;, labelled &ldquo;MODULAR
+            FURNITURE&rdquo; and given no pax annotation. Whether staff sit there
+            is an open question with CBVA (ASSUMPTIONS A16) and it sets the
+            denominator for the Phase 5 occupancy figures.
           </p>
         </CardBody>
       </Card>

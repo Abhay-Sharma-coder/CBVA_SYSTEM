@@ -410,6 +410,22 @@ def hull(points):
     return lower[:-1] + upper[:-1]
 
 
+def zone_containing(zones, x, y):
+    """Which wing a point falls in, or None."""
+    for zone in zones:
+        poly = zone["polygon"]
+        n, inside_poly, j = len(poly), False, len(poly) - 1
+        for i in range(n):
+            xi, yi = poly[i]
+            xj, yj = poly[j]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi:
+                inside_poly = not inside_poly
+            j = i
+        if inside_poly:
+            return zone["code"]
+    return None
+
+
 def build_zones(mask, spans, seats):
     """
     Wing outlines for zone highlighting and hit testing, taken from the
@@ -633,18 +649,21 @@ def main():
             "interpolated": len(made), "surplusDropped": surplus,
         })
 
-    # Zone B is not in the schedule at all. Count what is physically there so
-    # the gap is reported rather than hidden -- the drawing marks that wing
-    # "NO CHANGE AREA - ONLY REPAIR WORK" and gives it no PAX annotation.
-    zone_b_chairs = 0
-    for c in unassigned:
-        if c["x"] < 727 and c["y"] < 580:
-            zone_b_chairs += 1
-
     seats_by_zone = collections.defaultdict(int)
     for s in seats:
         seats_by_zone[s["zone"]] += 1
     zones, centre = build_zones(mask, spans, seats)
+
+    # Chairs the assignment did not claim, counted per zone against the real
+    # wing polygons. Most are meeting room and lounge seating, which is why
+    # this is broken out by zone rather than reported as one number: zone A's
+    # surplus is explained by its 25/10/8-pax rooms and its reception lounge,
+    # and zone B's is not explained by anything in the drawing.
+    unassigned_by_zone = collections.Counter()
+    for c in unassigned:
+        code = zone_containing(zones, c["x"], c["y"])
+        unassigned_by_zone[code or "outside"] += 1
+    zone_b_chairs = unassigned_by_zone.get("B", 0)
 
     mm_per_unit, scale_note = derive_scale(chairs)
 
@@ -701,6 +720,7 @@ def main():
         "zoneBChairsDetected": zone_b_chairs,
         "zoneBExpected": 0,
         "unassignedChairs": len(unassigned),
+        "unassignedChairsByZone": dict(sorted(unassigned_by_zone.items())),
         "bays": report,
     })
 
@@ -727,8 +747,12 @@ def main():
     print()
     print(f"detection accuracy: {td}/{len(seats)} seats placed from detected "
           f"geometry ({td / len(seats) * 100:.1f}%), {ti} interpolated")
-    print(f"zone B: {zone_b_chairs} chairs detected, 0 seats scheduled "
-          f"(drawing marks it NO CHANGE AREA)")
+    print(f"unassigned chair blocks by zone: "
+          f"{dict(sorted(unassigned_by_zone.items()))}")
+    print(f"  zone A's surplus is meeting room and lounge seating "
+          f"(25/10/8 pax rooms, reception, sofa, swivel chairs)")
+    print(f"  zone B: {zone_b_chairs} chairs, 0 seats scheduled -- see "
+          f"ASSUMPTIONS A16, this one is NOT explained by the drawing")
     confirmed = sum(v for k, v in SCHEDULE.items() if k in expected)
     print(f"schedule: {confirmed}/141 seats confirmed by a PAX annotation in "
           f"the drawing; {unconfirmed} carry no PAX label and rest on the "

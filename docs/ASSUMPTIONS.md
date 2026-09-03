@@ -77,24 +77,69 @@ sync in Phase 3 (`meeting_rooms.outlook_resource_email`).
 
 **Assumed:** no. Zone B has zero bookable seats.
 
-**Affects:** `src/lib/seed-data/inventory.ts` → `BAYS`, and therefore every
-occupancy denominator in the product.
+**Affects:** `src/lib/seed-data/inventory.ts` → `BAYS`, and therefore the
+denominator of the Phase 5 headline number.
 
-**Why it matters:** the Phase 2 extraction detected **32 chairs** in the
-top-left wing, against 0 scheduled seats. The drawing marks that wing three
-times *"NO CHANGE AREA — ONLY REPAIR WORK"* and — unlike every other work area —
-gives it no `N PAX.` annotation, which is why Phase 1 assigned it nothing and
-why the remaining bays still reconcile to exactly 141.
+**What was detected:** the chair detector found **222** chair blocks and the bay
+assignment claimed 130. The 92 it did not claim break down by wing as:
 
-But 32 desks is not a rounding error. If they are occupied, the floor holds
-~173 desks, not 141, and every occupancy percentage this product reports is
-overstated by roughly 19%. If they are retained-but-unused furniture in an area
-excluded from the fit-out, 141 is right.
+| Zone | Unassigned chairs | Explained? |
+|---|---|---|
+| A | 46 | **Yes** — the 25-pax boardroom, the 10-pax and 8-pax conference rooms, plus the reception lounge. The drawing labels `RECEPTION`, `SOFA`, `CENTER TABLE`, `SWIVEL CHAIR` ×2 and `3 grey + 1 black chair` in this wing, and a sheet note reads *"EXISTING HERMENMILLER CHAIRS IN BOARD ROOM TO RETAIN - 25 NOS"*. 25 + 10 + 8 = 43, plus lounge seating ≈ 46. Accounted for. |
+| C | 7 | Visitor and spare chairs beside the bays. |
+| D | 6 | As above. |
+| **B** | **33** | **No.** |
 
-We cannot tell from the drawing, and it is the kind of thing anyone at CBVA can
-answer in one sentence. **Ask before the analytics are built in Phase 5.**
-Until then the plan draws that furniture and gives it no seats, and
-`/admin/floor-plan` reports the gap on screen.
+**The hypothesis that boardroom and lounge furniture explains this is correct,
+but it lands on Zone A, not Zone B.** All of the lounge and conference
+annotations are inside the Zone A polygon (verified by point-in-polygon against
+`zones.json`, not by eye). Zone A's surplus is fully explained and needs no
+question asked.
+
+Zone B is the upper-left wing. Its annotations are room tags `K L M Q R`, a
+`HUB ROOM`, `ELEC PANELS`, two lifts, one `CENTRE TABLE` / `SOFA` pair — and
+**`MODULAR FURNITURE`**, which is workstation language, not lounge language.
+Three `NO CHANGE AREA — ONLY REPAIR WORK` notes sit just outside the wing on
+leader lines pointing into it. So the wing was excluded from the fit-out, which
+is why it has no `N PAX.` count and why Phase 1 gave it no seats — but "excluded
+from the refit" is not the same as "nobody sits there".
+
+**One sentence from CBVA closes this: are the ~33 desks in the north-west wing
+occupied by staff, and if so by how many?**
+
+### What it changes, with the arithmetic shown
+
+Measured from the seeded database: 141 desks — 47 fixed, 93 bookable, 1 blocked.
+The floor plan's occupancy denominator is the **bookable pool (93)**, not the
+total desk count.
+
+Let `D_r` be the reported denominator and `D_t` the true one. For any booking
+count `B`, reported utilisation is `B/D_r` and true utilisation is `B/D_t`, so
+the **relative overstatement is `D_t/D_r − 1`, constant in `B`**. The
+**percentage-point** gap is `B × (1/D_r − 1/D_t)`, which does depend on `B`.
+
+Three different quantities, all real, none interchangeable:
+
+| Quantity | Value |
+|---|---|
+| Total desks understated, as a fraction of the true total | 33 / 174 = **19.0%** |
+| Total desks understated, as a fraction of the reported total | 33 / 141 = **23.4%** |
+| Utilisation overstated, **if all 33 are bookable** (pool 93 → 126) | 126/93 − 1 = **35.5%** relative |
+| Utilisation overstated, **if they split like the floor** (~33% fixed → pool 115) | 115/93 − 1 = **23.7%** relative |
+| Point gap at the seeded 52 bookings, all-33-bookable case | 55.9% → 41.3% = **14.6 points** |
+
+An earlier draft of this entry said "overstated by roughly 19%". That number is
+the first row — *capacity* understated relative to the true total — and it was
+wrongly attached to the word *occupancy*. The occupancy figure is out by 23.7%
+or 35.5% depending on how the 33 split between fixed and bookable, which is
+itself unknown. Corrected here so the wrong one does not reach a partner.
+
+### When this has to close
+
+**Not before Phase 3.** Booking and the auto-release rule do not care about the
+denominator; they operate per seat. **Before the Phase 5 headline number** —
+peak observed occupancy against the bookable pool — is finalised. Pair it with
+**A1**: those two together fix the denominator, and nothing else does.
 
 ---
 

@@ -128,7 +128,7 @@ D8   D         4      4         3       4       1        0
 PD   D        18     18        18      18       0        0
 ----------------------------------------------------------
 TOTAL               141       130     141      11        0
-zone B  —      -      0        32       0       0        0
+zone B  —      -      0        33       0       0        0
 ```
 
 **130 of 141 desks (92.2%) placed from detected geometry. 11 interpolated.**
@@ -160,12 +160,30 @@ not proof.
 
 ### 🔴 Zone B — a new open question
 
-The top-left wing has **32 detected chairs and zero scheduled seats**. The
-drawing marks it three times *"NO CHANGE AREA — ONLY REPAIR WORK"* and gives it
-no pax annotation, which is why Phase 1 assigned it nothing. Whether those desks
-are occupied — and by whom — changes the occupancy denominator, which is the
-number this product exists to report. **See ASSUMPTIONS A16.** Its furniture is
-drawn in the texture; it gets no seat hit areas.
+The detector found 222 chair blocks; assignment claimed 130. The 92 unclaimed
+break down by wing:
+
+| Zone | Unclaimed | Explained? |
+|---|---|---|
+| A | 46 | **Yes** — 25-pax boardroom + 10-pax + 8-pax rooms + reception lounge (`RECEPTION`, `SOFA`, `CENTER TABLE`, `SWIVEL CHAIR`, and the retained-Herman-Miller sheet note all sit inside the zone A polygon) |
+| C / D | 7 / 6 | Visitor and spare chairs beside the bays |
+| **B** | **33** | **No** |
+
+The lounge-and-boardroom explanation is right, but it accounts for **zone A**,
+not zone B. Zone B is the north-west wing: room tags `K L M Q R`, a hub room,
+electrical panels, and the label **`MODULAR FURNITURE`** — workstation language.
+It carries no `N PAX.` count and three `NO CHANGE AREA — ONLY REPAIR WORK` notes
+point into it, so it was excluded from the fit-out; that is not the same as
+nobody sitting there.
+
+If those 33 are staff desks the bookable pool is 115–126 rather than 93, so
+utilisation is overstated by **24–36% relative** depending on how they split
+between fixed and bookable. **ASSUMPTIONS A16 carries the full derivation**,
+including why the three plausible-looking percentages here are different
+quantities. Its furniture is drawn in the texture; it gets no seat hit areas.
+
+**This does not block Phase 3.** It blocks the Phase 5 headline number, together
+with A1.
 
 ---
 
