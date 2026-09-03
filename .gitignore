@@ -46,3 +46,9 @@ next-env.d.ts
 /screenshots
 /test-results
 /playwright-report
+
+# Phase 2 CAD pipeline scratch
+/tools/cad/__pycache__
+/tools/cad/.cache.pkl
+/src/data/floorplan/plan-texture.svg
+.check-*.png
