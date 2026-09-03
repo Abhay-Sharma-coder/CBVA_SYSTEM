@@ -8,7 +8,7 @@ changes numbers or behaviour · 🟡 cosmetic — safe to leave.
 
 ---
 
-## 🔴 The three open client questions
+## 🔴 The four open client questions
 
 ### A1 — How do the 54 CAs split between Manager and Assistant Manager?
 
@@ -50,6 +50,12 @@ seats to the bookable pool — but it is invented. It determines which desks
 appear as "Reserved (Fixed)" on the floor plan, so it will be visibly wrong to
 anyone from CBVA looking at a demo.
 
+**Sharper since Phase 2.** The plan now shows the real floor, so this is no
+longer abstract: 47 specific desks in their real physical positions are drawn
+as reserved. A partner opening `/floor` will recognise their own bay and see
+the wrong desks greyed out. Answering this is now a five-minute edit in
+`/admin/floor-plan` (change a seat's status, Save) rather than a code change.
+
 ---
 
 ### A3 — Are the six meeting rooms right, and what are they called?
@@ -64,6 +70,31 @@ of the drawing; the **names are entirely ours**. CBVA will have its own names,
 probably after clients or partners. Also needed: the Outlook room resource
 mailbox for each, which is null on every row today and blocks the Graph calendar
 sync in Phase 3 (`meeting_rooms.outlook_resource_email`).
+
+---
+
+### A16 — Does anybody sit in Zone B?
+
+**Assumed:** no. Zone B has zero bookable seats.
+
+**Affects:** `src/lib/seed-data/inventory.ts` → `BAYS`, and therefore every
+occupancy denominator in the product.
+
+**Why it matters:** the Phase 2 extraction detected **32 chairs** in the
+top-left wing, against 0 scheduled seats. The drawing marks that wing three
+times *"NO CHANGE AREA — ONLY REPAIR WORK"* and — unlike every other work area —
+gives it no `N PAX.` annotation, which is why Phase 1 assigned it nothing and
+why the remaining bays still reconcile to exactly 141.
+
+But 32 desks is not a rounding error. If they are occupied, the floor holds
+~173 desks, not 141, and every occupancy percentage this product reports is
+overstated by roughly 19%. If they are retained-but-unused furniture in an area
+excluded from the fit-out, 141 is right.
+
+We cannot tell from the drawing, and it is the kind of thing anyone at CBVA can
+answer in one sentence. **Ask before the analytics are built in Phase 5.**
+Until then the plan draws that furniture and gives it no seats, and
+`/admin/floor-plan` reports the gap on screen.
 
 ---
 

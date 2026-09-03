@@ -245,3 +245,90 @@ and built against directly — hence the skip link, `:focus-visible` rings,
 
 No useful accessibility skill was found for React/Radix specifically; the
 dedicated accessibility pass is Phase 5 regardless.
+
+---
+
+## ADR-015 — The CAD reader is stdlib Python, not PyMuPDF
+
+`tools/cad/extract_floorplan.py` proved that filtering the PDF's 44 optional
+content groups gives exact geometry. Phase 2 needed three things from the
+drawing — layer-tagged paths, layer-tagged text with positions, and the block
+transforms — and all three are recoverable from the page content streams with
+nothing but `zlib`.
+
+So `tools/cad/cadparse.py` interprets them directly. The cost is ~350 lines of
+PDF operator handling. The benefit is that `npm run build:floorplan` works on a
+clean checkout with no pip step, which matters because the geometry is the one
+thing in this repo that cannot be re-derived from anything else.
+
+It is verified by reproducing the known per-layer path counts exactly (9,403 on
+layer `0`; 6,444 partition; 6,053 furniture hatch; 165 wall; 57 column). A
+parser that mishandled the graphics state would not land on those numbers.
+
+---
+
+## ADR-016 — Seats are detected from chairs, not desks
+
+The obvious primitive is the desk. It does not work: a 9-pax bay is drawn as
+one continuous run of hatched desktop, so clustering it yields a single blob
+and shape-matching a "workstation module" has nothing repeatable to match.
+
+Chairs do work. Each is a 7-point ~8pt block on layer `0` (AutoCAD block
+geometry plots as layer 0), there is exactly one per seat, and they do not
+touch each other. Filtering for that footprint yields **93** components — and
+the drawing's own schedule reads *"Work Station with rapid rail… = 93 nos"*.
+That agreement, arrived at from two independent directions, is what justified
+building the rest of the pipeline on it.
+
+Assignment to bays is a **globally greedy capacity-constrained match**, not
+nearest-anchor per chair. Nearest-anchor let one bay tag act as a magnet for a
+whole wing: A2 collected 22 chairs against a schedule of 4.
+
+Result: 130/141 detected, 11 interpolated, no bay over its scheduled count.
+
+---
+
+## ADR-017 — `seats.json` is the source of truth for geometry, not the database
+
+Seat position had to live somewhere that survives `npm run db:reset` and is
+reviewable in a diff, but also had to be editable at runtime, because furniture
+moves and detection is 92% right.
+
+So: the build writes `src/data/floorplan/seats.json` and commits it; the seed
+reads it; the editor writes the database live **and** exports back to the file,
+marking moved seats `source: "manual"`. Fifteen minutes of dragging becomes a
+committed artefact rather than a state one `db:reset` away from being lost.
+
+The alternative — database wins after first insert — was rejected because the
+corrections would exist only in whichever database happened to receive them.
+
+`buildSeats()` reconciles the file against `BAYS` strictly and throws on any
+mismatch, so a drift between the drawing and the inventory stops the seed rather
+than quietly producing a floor with missing desks.
+
+---
+
+## ADR-018 — Seats use `aria-disabled`, never `disabled`
+
+Non-bookable seats were originally `disabled`. An axe run and a keyboard test
+showed the cost: `disabled` removes an element from the tab order, so arrow
+navigation dead-ended at every booked desk, and a keyboard user could never
+land on a reserved desk to hear whose it was.
+
+Seats are now always focusable, carry `aria-disabled`, and guard inside their
+own `onClick`. A seat you cannot book is still a seat you need to be able to
+read.
+
+---
+
+## ADR-019 — The plan texture is one raster at 55% opacity
+
+The wall layer is 8,603 paths and the furniture layer 49,342. Neither goes in
+the live DOM; the drawing is baked to webp at build time and the only
+interactive nodes are the 141 seats. `e2e/floor-plan.spec.ts` asserts fewer
+than 50 SVG paths on the page so this cannot be quietly undone.
+
+The opacity is not decoration. At fit-to-floor a desk is about 11px across, and
+against full-strength CAD linework the seat chips are invisible — the first
+screenshot review showed exactly that. The drawing is context; the seats are the
+content, and the contrast between them has to say so.

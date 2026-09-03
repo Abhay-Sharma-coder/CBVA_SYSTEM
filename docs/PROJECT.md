@@ -68,8 +68,11 @@ holidays · settings (singleton) · audit_log
 
 Load-bearing details:
 
-- `seats.plan_x` / `plan_y` are in **plan coordinate space**, not pixels. Phase 1
-  seeds a temporary grid; Phase 2 replaces them from the CAD drawing.
+- `seats.plan_x` / `plan_y` / `rotation_deg` are in **plan coordinate space**,
+  not pixels, and come from the architect's drawing via
+  `npm run build:floorplan`. `src/data/floorplan/seats.json` is the source of
+  truth; the seed reads it and `/admin/floor-plan` writes back to it. One plan
+  unit is 70.5556 mm (the drawing plots at 1:200).
 - `seats.status` (`bookable`/`fixed`/`blocked`/`decommissioned`) is the desk's
   own state. The seven **visual** statuses are a different, richer vocabulary —
   they combine seat status with the viewer's relationship to a booking.
@@ -120,11 +123,15 @@ Repo, pinned stack, design system, 12-table schema, both database constraints
 with concurrency proofs, clock service, four adapters, realistic seed
 (141 desks, 141 people, 45 working days of bookings), app shell, `/styleguide`.
 
-**Phase 2 — CAD pipeline and 2D floor plan**
-Run `tools/cad/extract_floorplan.py` to pull walls, columns, glazing and
-furniture off the 44 CAD layers; derive real `plan_x`/`plan_y` per seat and
-migrate the temporary grid; build the pan/zoom SVG plan rendering seats through
-`SeatSwatch`; filtering by zone, bay and amenity.
+**Phase 2 — CAD pipeline and 2D floor plan ✅**
+`npm run build:floorplan` reads the 44 CAD layers with a stdlib PDF interpreter
+and writes walls, zones, seat anchors and a baked texture into
+`src/data/floorplan/`. 130 of 141 desks (92.2%) were located from the drawing's
+own geometry by detecting the repeated chair block; 11 were interpolated and are
+flagged as such. `/floor` renders the linework as one raster with 141 real
+`<button>` seats over it, with pan/zoom, zone focus, a list view and the state in
+the URL. `/admin/floor-plan` drags, rotates and retires desks and exports the
+corrections back to the committed geometry.
 
 **Phase 3 — Booking engine**
 Book / amend / cancel against the database constraints, treating `23505` and
@@ -134,7 +141,9 @@ app. Notifications through `MailProvider` into `notification_log`. Fix ADR-007's
 `starts_at` drift before slot definitions become editable.
 
 **Phase 4 — 3D floor plan**
-R3F v9 view over the same geometry and the same status vocabulary.
+R3F v9 `mode="3d"` inside the existing `<FloorPlan>`, over the same seat array,
+the same store and the same status vocabulary. `walls.json` is 252 pre-simplified
+polygons ready to extrude, and `meta.json.mmPerUnit` converts to real dimensions.
 
 **Phase 5 — Admin analytics and deploy**
 The actual product: occupancy by day, zone, team and bay; desks held versus
@@ -143,10 +152,16 @@ outbox. Full accessibility pass. Deploy.
 
 ## 9. Open questions
 
-See `ASSUMPTIONS.md`. The three that block real use:
+See `ASSUMPTIONS.md`. The four that block real use:
 
 1. **The HR list** — how the 54 CAs split Manager / Assistant Manager, and who
    holds an allocated seat. This sets the denominator for every number the
    product reports.
 2. **Which physical desks are fixed**, so the plan shows the right ones reserved.
+   Now visible: the plan draws 47 specific desks as reserved, in their real
+   positions.
 3. **The real meeting rooms** — names, capacities and Outlook resource mailboxes.
+4. **Does anybody sit in Zone B?** Phase 2 detected 32 chairs in a wing the
+   drawing marks "NO CHANGE AREA" and gives no pax count. If they are occupied,
+   the floor holds ~173 desks rather than 141 and every occupancy figure is
+   overstated by roughly 19%.
