@@ -93,8 +93,12 @@ export function usePanZoom(initial?: Rect) {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // Let seats keep their own click; only empty plan starts a drag.
-    if ((e.target as HTMLElement).closest("[data-seat]")) return;
+    // Only bare plan starts a pan. Capturing the pointer on the container
+    // stops a `click` ever reaching anything inside it, so seats and the
+    // overlaid zoom controls have to be excluded here or they go dead.
+    if ((e.target as HTMLElement).closest("[data-seat], button, a, input, select, textarea")) {
+      return;
+    }
     const el = containerRef.current;
     if (!el) return;
     el.setPointerCapture(e.pointerId);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "motion/react";
 
@@ -52,6 +53,43 @@ export function FloorClient() {
 
   const [intent, setIntent] = useState<FloorPlanSeat | null>(null);
   const reduceMotion = useReducedMotion() ?? false;
+
+  /* ---- the URL is the shareable copy of what is on screen ----
+     "Have a look at Zone C on Tuesday afternoon" has to be a link, not a list
+     of instructions. Date, slot, zone and view all round-trip through the
+     query string; the store stays the single reader for the rest of the UI. */
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const hydrated = useRef(false);
+
+  useEffect(() => {
+    if (hydrated.current) return;
+    hydrated.current = true;
+    const date = params.get("date");
+    const slot = params.get("slot");
+    const zone = params.get("zone");
+    const v = params.get("view");
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setActiveDate(date);
+    if (slot === "AM" || slot === "PM") setActiveSlot(slot);
+    if (zone === "A" || zone === "B" || zone === "C" || zone === "D") setActiveZone(zone);
+    if (v === "list" || v === "plan") setView(v);
+  }, [params, setActiveDate, setActiveSlot, setActiveZone, setView]);
+
+  useEffect(() => {
+    if (!hydrated.current || activeDate === null) return;
+    const next = new URLSearchParams();
+    next.set("date", activeDate);
+    next.set("slot", activeSlot);
+    if (activeZone) next.set("zone", activeZone);
+    if (view !== "plan") next.set("view", view);
+    const query = next.toString();
+    if (query !== params.toString()) {
+      // replace, not push: changing slot should not stack up history entries
+      // somebody then has to press Back through.
+      router.replace(`${pathname}?${query}`, { scroll: false });
+    }
+  }, [activeDate, activeSlot, activeZone, view, params, pathname, router]);
 
   const dates = useQuery({
     queryKey: ["floor", "dates"],

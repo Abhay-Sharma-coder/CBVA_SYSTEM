@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
 
 import { FloorClient } from "@/app/floor/floor-client";
@@ -21,7 +23,19 @@ export default function Page() {
         </p>
       </header>
 
-      <FloorClient />
+      {/* useSearchParams reads the URL on the client, so the plan needs a
+          boundary or the whole route opts out of static rendering. */}
+      <Suspense
+        fallback={
+          <div
+            className="h-[clamp(26rem,70vh,50rem)] rounded-md border border-hairline bg-surface-sunken"
+            role="status"
+            aria-label="Loading the floor plan"
+          />
+        }
+      >
+        <FloorClient />
+      </Suspense>
 
       <p className="text-xs text-ink-subtle">
         Geometry extracted from {floorplanMeta.source} ·{" "}

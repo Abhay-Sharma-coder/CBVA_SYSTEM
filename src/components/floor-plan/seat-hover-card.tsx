@@ -37,8 +37,12 @@ export function SeatHoverCard({
 
   return (
     <motion.div
-      role="status"
-      aria-live="polite"
+      // aria-hidden on purpose. The seat button's own accessible name already
+      // carries code, zone, bay, status and occupant, and it fires on focus.
+      // Announcing this card as well would say everything twice while a
+      // keyboard user arrows across a bay.
+      aria-hidden="true"
+      data-seat-card={seat.seatCode}
       className="pointer-events-none absolute z-30 w-44 rounded-md border border-hairline bg-surface px-3 py-2 shadow-hairline"
       style={{
         left: flip ? screenX - 190 : screenX + 16,

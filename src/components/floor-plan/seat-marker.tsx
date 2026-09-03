@@ -72,10 +72,16 @@ function SeatMarkerImpl({
       data-zone={seat.zone}
       data-bay={seat.bay}
       tabIndex={tabIndex}
-      disabled={!token.interactive}
-      aria-label={label}
+      // aria-disabled, never the `disabled` attribute. A disabled button is
+      // removed from the tab order entirely, which would make arrow navigation
+      // dead-end at every booked desk and would stop a keyboard user ever
+      // reading who has it. The seat stays focusable and announces its state;
+      // it simply does not act.
       aria-disabled={!token.interactive}
-      onClick={() => onActivate(seat)}
+      aria-label={label}
+      onClick={() => {
+        if (token.interactive) onActivate(seat);
+      }}
       onFocus={() => onFocus(seat)}
       onBlur={onBlur}
       onPointerEnter={() => onFocus(seat)}

@@ -185,6 +185,9 @@ export function PlanCanvas({
       {...handlers}
       onPointerDown={beginPan}
       role="application"
+      // Focusable so the plan itself can take the zoom keys. Without it the
+      // +/-/0 shortcuts only fired when a seat happened to hold focus.
+      tabIndex={0}
       aria-label="Floor 4 plan. Use the arrow keys to move between seats, plus and minus to zoom, and 0 to fit the floor."
     >
       <motion.div
@@ -214,6 +217,9 @@ export function PlanCanvas({
           alt=""
           aria-hidden="true"
           draggable={false}
+          width={PLAN_BOUNDS.width}
+          height={PLAN_BOUNDS.height}
+          decoding="async"
           className="pointer-events-none absolute inset-0 h-full w-full select-none opacity-55"
         />
 

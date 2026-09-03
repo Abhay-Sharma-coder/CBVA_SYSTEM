@@ -52,7 +52,9 @@ export function DateStrip({
               {day.isToday ? "Today" : day.weekdayLabel}
             </span>
             <span className="tabular block text-sm font-medium">{day.dayLabel}</span>
-            <span className="block text-[10px] text-ink-subtle">{day.monthLabel}</span>
+            {/* ink-muted, not ink-subtle: the selected chip sits on navy-tint
+                rather than paper, where subtle drops to 4.21:1. */}
+            <span className="block text-[10px] text-ink-muted">{day.monthLabel}</span>
           </button>
         );
       })}

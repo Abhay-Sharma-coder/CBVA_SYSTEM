@@ -330,6 +330,8 @@ export function FloorPlanEditor({ date, slot }: { date: string; slot: "AM" | "PM
                     <div className="flex items-center gap-2">
                       <input
                         id="seat-rotation"
+                        name="seat-rotation"
+                        autoComplete="off"
                         type="number"
                         min={0}
                         max={359}
@@ -362,6 +364,7 @@ export function FloorPlanEditor({ date, slot }: { date: string; slot: "AM" | "PM
                     </label>
                     <select
                       id="seat-status"
+                      name="seat-status"
                       value={current.seatStatus}
                       onChange={(e) => change({ status: e.target.value as SeatDbStatus })}
                       className="h-9 w-full rounded-sm border border-hairline bg-surface px-2 text-sm"
