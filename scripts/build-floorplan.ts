@@ -84,8 +84,16 @@ function validate() {
   if (seats.seats.length !== 141) {
     problems.push(`expected 141 seat anchors, got ${seats.seats.length}`);
   }
-  if (walls.polygons.length > 400) {
-    problems.push(`expected under 400 wall polygons, got ${walls.polygons.length}`);
+  if (walls.polygons.length > 600) {
+    problems.push(`expected under 600 wall polygons, got ${walls.polygons.length}`);
+  }
+  // Per-class budgets, so one noisy class cannot eat the whole allowance and
+  // silently truncate another. They sum to the 400 the extrusion is sized for.
+  const WALL_BUDGETS = { wall: 150, partition: 200, glazing: 300 } as const;
+  for (const [layer, budget] of Object.entries(WALL_BUDGETS)) {
+    const n = walls.polygons.filter((p) => p.layer === layer).length;
+    if (n > budget) problems.push(`expected under ${budget} ${layer} polygons, got ${n}`);
+    if (n === 0) problems.push(`no ${layer} polygons were produced`);
   }
   if (zones.zones.length !== 4) {
     problems.push(`expected 4 zones, got ${zones.zones.length}`);

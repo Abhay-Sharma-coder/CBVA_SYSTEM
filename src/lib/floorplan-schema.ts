@@ -36,9 +36,24 @@ export const floorplanMetaSchema = z.object({
   }),
 });
 
+/**
+ * The shell, split by what Phase 4 has to do with it: `wall` is full height and
+ * opaque, `partition` is desk-height, `glazing` is full height and translucent.
+ * Generator 2 emitted one untagged array and dropped glazing altogether, which
+ * is fine flat on a drawing and wrong in three dimensions.
+ */
+export const wallLayerSchema = z.enum(["wall", "partition", "glazing"]);
+export type WallLayer = z.infer<typeof wallLayerSchema>;
+
 export const wallsSchema = z.object({
   viewBox: z.string(),
-  polygons: z.array(z.object({ closed: z.boolean(), points: z.array(point).min(2) })),
+  polygons: z.array(
+    z.object({
+      layer: wallLayerSchema,
+      closed: z.boolean(),
+      points: z.array(point).min(2),
+    }),
+  ),
 });
 
 export const zonesSchema = z.object({

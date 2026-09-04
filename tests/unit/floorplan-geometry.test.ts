@@ -82,8 +82,59 @@ describe("generated floor plan geometry", () => {
   });
 
   it("stays under the wall polygon budget Phase 4 extrudes", () => {
-    expect(floorplanWalls.polygons.length).toBeLessThan(400);
+    // 400 in generator 2, when walls were one untagged class and glazing was
+    // dropped. Generator 3 splits the shell three ways and adds glazing, which
+    // chains to 280 runs on its own; truncating to fit 400 lost 45% of the
+    // curtain wall. 600 is what the three classes actually need, and it is
+    // still three draw calls once merged (ADR-030).
+    expect(floorplanWalls.polygons.length).toBeLessThan(600);
     expect(floorplanWalls.polygons.length).toBeGreaterThan(50);
+  });
+
+  it("splits the shell into the three classes Phase 4 renders differently", () => {
+    const byLayer = new Map<string, number>();
+    for (const p of floorplanWalls.polygons) {
+      byLayer.set(p.layer, (byLayer.get(p.layer) ?? 0) + 1);
+    }
+    expect([...byLayer.keys()].sort()).toEqual(["glazing", "partition", "wall"]);
+    for (const [layer, budget] of [
+      ["wall", 150],
+      ["partition", 200],
+      ["glazing", 300],
+    ] as const) {
+      expect(byLayer.get(layer) ?? 0).toBeGreaterThan(0);
+      expect(byLayer.get(layer) ?? 0).toBeLessThanOrEqual(budget);
+    }
+  });
+
+  it("carries no hatch fills among the wall chains", () => {
+    // Generator 2 shipped a 61-point, 971-unit zig-zag inside a 35-unit box as
+    // the LONGEST polygon in the file. Flat it is invisible; extruded it is a
+    // thicket in zone A. The discriminator is how often the chain doubles back.
+    const reversalShare = (points: ReadonlyArray<readonly [number, number]>) => {
+      let total = 0;
+      let reversals = 0;
+      for (let i = 1; i < points.length - 1; i += 1) {
+        const [ax, ay] = points[i - 1];
+        const [bx, by] = points[i];
+        const [cx, cy] = points[i + 1];
+        const ux = bx - ax;
+        const uy = by - ay;
+        const vx = cx - bx;
+        const vy = cy - by;
+        const lu = Math.hypot(ux, uy);
+        const lv = Math.hypot(vx, vy);
+        if (lu < 1e-9 || lv < 1e-9) continue;
+        total += 1;
+        if ((ux * vx + uy * vy) / (lu * lv) < -0.7) reversals += 1;
+      }
+      return total === 0 ? 0 : reversals / total;
+    };
+
+    for (const p of floorplanWalls.polygons) {
+      if (p.points.length < 6) continue;
+      expect(reversalShare(p.points)).toBeLessThan(0.8);
+    }
   });
 
   it("describes all four wings", () => {

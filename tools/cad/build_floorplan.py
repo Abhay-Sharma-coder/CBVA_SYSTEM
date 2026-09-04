@@ -42,7 +42,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 PDF = os.path.join(HERE, "09 -R8 - NB -FURNITURE LAYOUT - 12-06-2025.pdf")
 OUT = os.path.join(ROOT, "src", "data", "floorplan")
 
-GENERATOR_VERSION = 2
+GENERATOR_VERSION = 3
 
 # The shell. I-DOOR is deliberately absent: those are the swing arcs, and they
 # are noise in 2D and wrong in 3D.
@@ -51,6 +51,26 @@ WALL_LAYERS = {
     "I-WALL", "I-PART-FULL", "B- BEAM",
 }
 GLAZING_LAYERS = {"G-GLASS", "W-WINDOW"}
+
+# Generator 3 splits the shell into three classes, because Phase 4 extrudes
+# them at different heights and in different materials. Chaining runs PER
+# CLASS, so a partition never welds itself onto a structural wall and inherit
+# its height. Glazing was previously dropped entirely -- it only reached the
+# baked texture -- because in 2D it is a line like any other. In 3D it is the
+# difference between a room and a box.
+#
+# The budgets are per class so one noisy class cannot eat the allowance and
+# silently truncate another. Generator 2's single budget was 400; the classes
+# chain to 97 / 157 / 280 naturally, and truncating glazing to fit 400 threw
+# away 45% of its length -- a curtain wall with holes in it. The 400 existed
+# because SVGLoader and ExtrudeGeometry choke on CAD complexity; Phase 4
+# extrudes these as merged segment boxes (ADR-030), where 534 chains is three
+# draw calls and ~25k triangles. So the ceiling moves to 600 and stays honest.
+WALL_CLASSES = (
+    ("wall", {"W-WALL", "K-WALL", "C- COLOUMN", "K-COLS", "I-WALL", "B- BEAM"}, 150),
+    ("partition", {"P-FULLHEIGHT PARTITION", "I-PART-FULL"}, 200),
+    ("glazing", GLAZING_LAYERS, 300),
+)
 
 BAY_RE = re.compile(r"^(A[12]|C[1-7]|D[1-8])$")
 PAX_RE = re.compile(r"^(\d+)\s*PAX\.?$", re.I)
@@ -117,7 +137,38 @@ def drop_collinear(points, tol_deg=0.5):
 # walls
 # --------------------------------------------------------------------------
 
-def build_walls(paths, snap=1.0, simplify=1.2, min_length=10.0, max_polys=400):
+def is_hatch(points, min_points=6, reversal_share=0.8):
+    """
+    A chain that doubles back on itself at nearly every vertex is a hatch fill,
+    not a wall.
+
+    Generator 2 shipped one of these as the LONGEST polygon in walls.json: 61
+    points and 971 plan units of 45-degree zig-zag inside a 35-unit box, in
+    zone A. Flat on the drawing it is invisible; extruded it is a thicket.
+
+    Measured over all 252 polygons the two populations do not overlap. That
+    chain reverses at 100% of its vertices; the five longest real walls
+    (598-908 units) reverse at 0-40%. Short three-point "out and back" stubs
+    are left alone -- as extruded ribbons they harmlessly overlap themselves,
+    and they are real wall.
+    """
+    if len(points) < min_points:
+        return False
+    total = reversals = 0
+    for a, b, c in zip(points, points[1:], points[2:]):
+        ux, uy = b[0] - a[0], b[1] - a[1]
+        vx, vy = c[0] - b[0], c[1] - b[1]
+        lu, lv = math.hypot(ux, uy), math.hypot(vx, vy)
+        if lu < 1e-9 or lv < 1e-9:
+            continue
+        total += 1
+        if (ux * vx + uy * vy) / (lu * lv) < -0.7:   # turn sharper than 135 deg
+            reversals += 1
+    return total > 0 and reversals / total >= reversal_share
+
+
+def build_walls(paths, layers=WALL_LAYERS, snap=1.0, simplify=1.2,
+                min_length=10.0, max_polys=400):
     """
     The raw wall layers are 8,603 paths of CAD noise. Chain them into
     polylines and simplify hard: Phase 4 extrudes these, and SVGLoader chokes
@@ -130,7 +181,7 @@ def build_walls(paths, snap=1.0, simplify=1.2, min_length=10.0, max_polys=400):
     coords = {}
     seen = set()
     for p in paths:
-        if p.layer not in WALL_LAYERS:
+        if p.layer not in layers:
             continue
         for sp in p.subpaths:
             for a, b in zip(sp, sp[1:]):
@@ -187,6 +238,8 @@ def build_walls(paths, snap=1.0, simplify=1.2, min_length=10.0, max_polys=400):
                 continue
             length = sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
             if length < min_length:
+                continue
+            if is_hatch(pts):
                 continue
             closed = math.dist(pts[0], pts[-1]) < snap * 2
             polys.append({"points": pts, "length": length, "closed": closed})
@@ -618,7 +671,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf", default=PDF)
     ap.add_argument("--out", default=OUT)
-    ap.add_argument("--max-walls", type=int, default=400)
+    ap.add_argument("--max-walls", type=int, default=600)
     a = ap.parse_args()
 
     with open(a.pdf, "rb") as fh:
@@ -635,8 +688,16 @@ def main():
     print(f"  building interior: {mask.coverage * 100:.1f}% of the plan box",
           file=sys.stderr)
 
-    # ---- walls
-    walls = build_walls(paths, max_polys=a.max_walls)
+    # ---- walls, one chained run per class
+    walls = []
+    for name, layers, budget in WALL_CLASSES:
+        got = build_walls(paths, layers=layers, max_polys=budget)
+        if len(got) > budget:
+            raise SystemExit(f"{name} simplification produced {len(got)} polygons")
+        for w in got:
+            w["layer"] = name
+        walls.extend(got)
+        print(f"  {name}: {len(got)} polygons (budget {budget})", file=sys.stderr)
     if len(walls) > a.max_walls:
         raise SystemExit(f"wall simplification produced {len(walls)} polygons")
     print(f"  walls: {len(walls)} polygons", file=sys.stderr)
@@ -742,7 +803,7 @@ def main():
     dump("meta.json", meta)
     dump("walls.json", {
         "viewBox": meta["viewBox"],
-        "polygons": [{"closed": w["closed"],
+        "polygons": [{"layer": w["layer"], "closed": w["closed"],
                       "points": [[round(x, 2), round(y, 2)] for x, y in w["points"]]}
                      for w in walls],
     })
