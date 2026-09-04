@@ -35,7 +35,7 @@ let seatCode = "";
 /** ISO start of the booking made in step 1. Drives every clock move below. */
 let slotStartsAt = "";
 
-test.beforeAll(async ({ request, browser }) => {
+test.beforeAll(async ({ request }) => {
   const am = await personaOfGrade(request, "assistant_manager");
   booker = am.email;
   const adminPersona = await personaOfGrade(request, "admin_staff");
@@ -45,19 +45,19 @@ test.beforeAll(async ({ request, browser }) => {
   // A clean slate for the two people who book here. The engine refuses a second
   // desk in the same slot, so without this the walkthrough passes once and then
   // fails on its own correct behaviour for the rest of the day.
-  const page = await browser.newPage();
-  await clearUpcomingBookings(page, booker);
-  await clearUpcomingBookings(page, manager.email);
-  // Warm the routes the first step needs, so its budget is spent on the
-  // journey rather than on webpack.
-  await page.request.get("/api/floor/dates");
-  await page.close();
+  //
+  // On the worker-scoped `request` fixture rather than a throwaway page: a page
+  // closed while a DELETE is still settling fails this hook, and a failed hook
+  // in a serial spec skips all eleven steps.
+  await clearUpcomingBookings(request, booker);
+  await clearUpcomingBookings(request, manager.email);
 });
 
-test.afterAll(async ({ browser }) => {
-  const page = await browser.newPage();
-  await resetClock(page);
-  await page.close();
+test.afterAll(async ({ request }) => {
+  // Without fail: the offset is one row shared by the whole database, so a spec
+  // that advanced it and stopped leaves the dev server and every later spec
+  // days into the future.
+  await resetClock(request);
 });
 
 /** Opens the floor plan on the first bookable day, in the morning slot. */

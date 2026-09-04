@@ -12,6 +12,16 @@
  */
 import type { APIRequestContext, Page } from "@playwright/test";
 
+/**
+ * Everything here works on an `APIRequestContext`, not a `Page`.
+ *
+ * Tests pass `page.request`; a `beforeAll` passes the worker-scoped `request`
+ * fixture. Driving these through a throwaway page meant closing it while a
+ * request was still settling, which surfaces as "Request context disposed" and
+ * fails the hook — and a failed hook in a serial spec skips every test after it.
+ */
+type Http = APIRequestContext;
+
 export interface Persona {
   email: string;
   displayName: string;
@@ -24,8 +34,9 @@ export interface Persona {
  * Signs in by posting to the same route the role switcher uses, so the cookie
  * is set the way production sets it rather than being fabricated.
  */
-export async function signInAs(page: Page, email: string): Promise<void> {
-  const res = await page.request.post("/api/session", { data: { email } });
+export async function signInAs(http: Http | Page, email: string): Promise<void> {
+  const api = "request" in http ? http.request : http;
+  const res = await api.post("/api/session", { data: { email } });
   if (!res.ok()) throw new Error(`Could not sign in as ${email}: ${await res.text()}`);
 }
 
@@ -75,8 +86,9 @@ export async function advanceClock(page: Page, seconds: number): Promise<void> {
   if (!res.ok()) throw new Error(`Could not advance the clock: ${await res.text()}`);
 }
 
-export async function resetClock(page: Page): Promise<void> {
-  await page.request.post("/api/clock", { data: { action: "reset" } });
+export async function resetClock(http: Http | Page): Promise<void> {
+  const api = "request" in http ? http.request : http;
+  await api.post("/api/clock", { data: { action: "reset" } });
 }
 
 /** Runs auto-release, the notification queue and the calendar retry, now. */
@@ -108,20 +120,20 @@ export async function shot(page: Page, name: string): Promise<void> {
  * with a perfectly correct error message.
  *
  * It goes through the real DELETE route rather than the database, so the clean
- * slate is produced by the product rather than around it. `force` is not
- * available to a user, so the clock is reset first: past the cut-off, cancelling
- * is refused, which is the whole point of the cut-off.
+ * slate is produced by the product rather than around it. The clock is reset
+ * first because past the cut-off a user cannot cancel, which is the whole point
+ * of the cut-off.
  */
-export async function clearUpcomingBookings(page: Page, email: string): Promise<number> {
-  await signInAs(page, email);
-  await resetClock(page);
+export async function clearUpcomingBookings(http: Http, email: string): Promise<number> {
+  await signInAs(http, email);
+  await resetClock(http);
 
-  const res = await page.request.get("/api/bookings");
+  const res = await http.get("/api/bookings");
   const body = (await res.json()) as { upcoming: Array<{ id: string }> };
 
   let cleared = 0;
   for (const booking of body.upcoming) {
-    const deleted = await page.request.delete(`/api/bookings/${booking.id}`, { data: {} });
+    const deleted = await http.delete(`/api/bookings/${booking.id}`, { data: {} });
     if (deleted.ok()) cleared += 1;
   }
   return cleared;
