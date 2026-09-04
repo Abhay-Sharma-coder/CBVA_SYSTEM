@@ -5,6 +5,8 @@ import { handle, parseBody, routeContext } from "@/lib/api";
 import { BookingError } from "@/lib/booking/errors";
 import { emitBadgeSwipe } from "@/lib/booking/badge";
 import { serverEnv } from "@/lib/config";
+import { eq } from "drizzle-orm";
+
 import { schema } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +32,17 @@ export async function POST(request: Request) {
     const ctx = await routeContext();
     const body = await parseBody(request, schemaIn);
 
-    const targetId = body.userId ?? ctx.actor.id;
+    // The role switcher knows people by email, so either identifier works.
+    let targetId = body.userId ?? ctx.actor.id;
+    if (body.email) {
+      const [found] = await ctx.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.email, body.email))
+        .limit(1);
+      if (!found) throw new BookingError("USER_NOT_FOUND", `Nobody on the list has ${body.email}.`);
+      targetId = found.id;
+    }
     if (targetId !== ctx.actor.id && !ctx.actor.isAdmin) {
       throw new BookingError("FORBIDDEN", "Only an administrator can swipe for somebody else.");
     }

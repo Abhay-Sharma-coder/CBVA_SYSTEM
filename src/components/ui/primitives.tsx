@@ -276,3 +276,124 @@ export function EmptyState({
     </div>
   );
 }
+
+/* --------------------------------------------------------------- Textarea */
+
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>
+>(({ className, rows = 3, ...props }, ref) => (
+  <textarea
+    ref={ref}
+    rows={rows}
+    className={cn(
+      "w-full rounded-sm border border-hairline bg-surface px-3 py-2 text-sm text-ink",
+      "placeholder:text-ink-subtle",
+      "focus-visible:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-navy",
+      "disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:opacity-60",
+      className,
+    )}
+    {...props}
+  />
+));
+Textarea.displayName = "Textarea";
+
+/* ----------------------------------------------------------------- Select */
+
+/**
+ * A native select, styled.
+ *
+ * `@radix-ui/react-select` is installed, but the native control is better here:
+ * it is keyboard- and screen-reader-correct with no work, it uses the platform
+ * picker on a phone, and this product has no requirement a native select cannot
+ * meet. The role switcher and the list-view filters already use one.
+ */
+export const Select = React.forwardRef<
+  HTMLSelectElement,
+  React.SelectHTMLAttributes<HTMLSelectElement>
+>(({ className, ...props }, ref) => (
+  <select
+    ref={ref}
+    className={cn(
+      "h-9 w-full rounded-sm border border-hairline bg-surface px-2 text-sm text-ink",
+      "focus-visible:border-navy focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-navy",
+      "disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:opacity-60",
+      className,
+    )}
+    {...props}
+  />
+));
+Select.displayName = "Select";
+
+/* ---------------------------------------------------------------- Field */
+
+/** A label bound to one control, with optional help and error text beneath. */
+export function Field({
+  label,
+  htmlFor,
+  hint,
+  error,
+  children,
+  className,
+}: {
+  label: string;
+  htmlFor: string;
+  hint?: string;
+  error?: string | null;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && !error ? <p className="text-xs text-ink-subtle">{hint}</p> : null}
+      {error ? (
+        <p className="text-xs text-danger" id={`${htmlFor}-error`}>
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- StatusMessage */
+
+/**
+ * The one way this product reports the outcome of a write.
+ *
+ * Deliberately inline and in flow rather than a toast. A toast that says
+ * "somebody just took that desk" can be missed, and the recovery — the map has
+ * been refreshed, pick another — needs to be read next to the thing it is about.
+ * `role="status"` for good news and `role="alert"` for a refusal, so a screen
+ * reader interrupts only when it should.
+ */
+export function StatusMessage({
+  tone,
+  children,
+  className,
+}: {
+  tone: "positive" | "danger" | "caution" | "neutral";
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const styles: Record<string, string> = {
+    positive: "border-positive/30 bg-positive/8 text-positive",
+    danger: "border-danger/30 bg-danger/8 text-danger",
+    caution: "border-caution/30 bg-caution/8 text-caution",
+    neutral: "border-hairline bg-surface-sunken text-ink-muted",
+  };
+  return (
+    <p
+      role={tone === "danger" ? "alert" : "status"}
+      aria-live={tone === "danger" ? "assertive" : "polite"}
+      className={cn(
+        "rounded-sm border px-3 py-2 text-sm",
+        styles[tone],
+        className,
+      )}
+    >
+      {children}
+    </p>
+  );
+}

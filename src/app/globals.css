@@ -189,3 +189,48 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------- print ---
+ *
+ * The desk QR sheet is the one page in this product whose real output is paper:
+ * 141 stickers that go on 141 desks. So it gets real print rules rather than
+ * whatever the browser decides — a fixed grid so a sticker is never split
+ * across a page break, no app chrome, and hairlines that survive at 300dpi.
+ */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  header[data-app-header],
+  footer[data-app-footer],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .qr-sheet {
+    display: grid !important;
+    /* 3 across, 4 down = 12 to an A4 page. */
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6mm !important;
+  }
+
+  .qr-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    /* A hairline at screen weight disappears on paper. */
+    border: 0.4mm solid #999 !important;
+    padding: 4mm 2mm !important;
+  }
+
+  .qr-card svg {
+    /* Big enough that a phone camera finds it from arm's length. */
+    width: 32mm !important;
+    height: 32mm !important;
+  }
+}

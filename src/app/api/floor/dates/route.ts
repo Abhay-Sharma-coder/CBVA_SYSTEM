@@ -30,6 +30,9 @@ export async function GET() {
     timezone: settings.timezone,
     bookingWindowDays: settings.bookingWindowDays,
     bookingWindowWorkingDays: settings.bookingWindowWorkingDays,
+    // The dialog counts down to this; it is a settings value, never a constant.
+    cutoffMinutes: settings.cutoffMinutes,
+    autoReleaseMinutes: settings.autoReleaseMinutes,
     days: bookableDays({
       now: clock.now(),
       workingDays: settings.bookingWindowWorkingDays,

@@ -1,20 +1,26 @@
 import type { Metadata } from "next";
-import { PhaseStub } from "@/components/app-shell/phase-stub";
+
+import { RoomsClient } from "@/app/rooms/rooms-client";
+import { db } from "@/lib/db";
+import { getSettings } from "@/lib/settings";
 
 export const metadata: Metadata = { title: "Meeting Rooms" };
+export const dynamic = "force-dynamic";
 
-export default function Page() {
+export default async function Page() {
+  const settings = await getSettings(db());
+
   return (
-    <PhaseStub
-      title="Meeting Rooms"
-      phase={3}
-      summary="Boardroom, conference and huddle room booking for Floor 4."
-      willInclude={[
-        "Book an arbitrary time range, not a fixed slot — overlaps are rejected by the database",
-        "Six rooms seeded from the drawing, from the 25-seat Boardroom down to the 4-seat Huddle Room",
-        "Two-way sync with Outlook room resource mailboxes via Microsoft Graph",
-        "Capacity and amenity filtering",
-      ]}
-    />
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl">Meeting Rooms</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+          One day at a time, {settings.officeHours.start} to {settings.officeHours.end}.
+          Booked hours are locked; a room is held the moment you confirm, and the
+          calendar invitation follows.
+        </p>
+      </header>
+      <RoomsClient />
+    </div>
   );
 }

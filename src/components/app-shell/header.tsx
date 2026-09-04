@@ -21,7 +21,10 @@ export function Header() {
   const isAdmin = data?.user?.isAdmin ?? false;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-hairline bg-paper/95 backdrop-blur-[2px]">
+    <header
+      data-app-header
+      className="sticky top-0 z-40 border-b border-hairline bg-paper/95 backdrop-blur-[2px]"
+    >
       <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-6 px-4 sm:px-6">
         <Link
           href="/"

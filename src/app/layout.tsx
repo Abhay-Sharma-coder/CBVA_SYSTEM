@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { fontVariables } from "@/lib/fonts";
 import { Providers } from "@/components/providers";
 import { Header } from "@/components/app-shell/header";
+import { DemoPanel } from "@/components/demo/demo-panel";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -34,12 +35,12 @@ export default function RootLayout({
           <main id="main" className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6">
             {children}
           </main>
-          <footer className="mx-auto max-w-[1400px] px-4 pt-4 pb-10 sm:px-6">
+          <footer data-app-footer className="mx-auto max-w-[1400px] px-4 pt-4 pb-10 sm:px-6">
             <p className="border-t border-hairline pt-4 text-xs text-ink-subtle">
-              CBV&nbsp;&amp; Associates LLP · Floor 4, Mumbai · Phase 1 foundation
-              build
+              CBV&nbsp;&amp; Associates LLP · Floor 4, Mumbai · Booking engine
             </p>
           </footer>
+          <DemoPanel />
         </Providers>
       </body>
     </html>

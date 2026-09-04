@@ -14,7 +14,9 @@ import {
   ViewToggle,
   ZoneFilter,
 } from "@/components/floor-plan/controls";
-import { BookingIntentDialog } from "@/components/floor-plan/booking-intent-dialog";
+import { BookingDialog } from "@/components/floor-plan/booking-dialog";
+import { useMyBookings } from "@/components/booking/use-bookings";
+import { useClock } from "@/components/app-shell/session";
 import type {
   BookableDay,
   FloorPlanPayload,
@@ -27,6 +29,8 @@ import { useUiStore } from "@/lib/store/ui";
 interface DatesPayload {
   timezone: string;
   bookingWindowDays: number;
+  bookingWindowWorkingDays: number;
+  cutoffMinutes: number;
   days: BookableDay[];
   slots: SlotDefinition[];
 }
@@ -132,16 +136,29 @@ export function FloorClient() {
   );
 
   const onActivateSeat = useCallback((seat: FloorPlanSeat) => {
-    // Phase 3 wires the write path. For now this records the intent so the
-    // flow can be walked end to end and the booking API has a caller waiting.
-    console.info("[floor] booking intent", {
-      seatCode: seat.seatCode,
-      bay: seat.bay,
-      zone: seat.zone,
-      status: seat.status,
-    });
     setIntent(seat);
   }, []);
+
+  /**
+   * The dialog needs three things the plan does not carry: whether this person
+   * may book for a colleague, the shared clock, and the cut-off. All three come
+   * from the server rather than being inferred — reading "now" from the
+   * browser's Date would let the client and the server disagree about whether a
+   * slot has started.
+   */
+  const mine = useMyBookings();
+  const clock = useClock();
+
+  /**
+   * The seat the dialog is showing, taken from the LIVE query rather than the
+   * snapshot captured on click. After a booking succeeds the refetch changes
+   * that seat's status, and the dialog has to follow — otherwise it goes on
+   * offering "Confirm booking" for a desk that is already yours.
+   */
+  const intentSeat = useMemo(
+    () => (intent ? (seats.find((s) => s.seatCode === intent.seatCode) ?? intent) : null),
+    [intent, seats],
+  );
 
   const slots = dates.data?.slots ?? [];
   const loading = dates.isLoading || (floor.isLoading && !floor.data);
@@ -215,11 +232,14 @@ export function FloorClient() {
         />
       )}
 
-      <BookingIntentDialog
-        seat={intent}
+      <BookingDialog
+        seat={intentSeat}
         date={activeDate}
         slot={activeSlot}
         slotDefinition={slots.find((s) => s.key === activeSlot) ?? null}
+        canBookOnBehalf={mine.data?.canBookOnBehalf ?? false}
+        now={clock.data?.now ?? null}
+        cutoffMinutes={dates.data?.cutoffMinutes ?? 60}
         onClose={() => setIntent(null)}
       />
     </div>
