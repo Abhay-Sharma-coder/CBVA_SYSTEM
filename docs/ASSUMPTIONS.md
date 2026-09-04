@@ -443,3 +443,69 @@ and cancel:
 
 Both are cheap to reverse if CBVA disagrees; both are settings-adjacent
 behaviour rather than settings values, so changing them is a code change.
+
+---
+
+### A22 — 🟠 The auto-release job has no blast radius bound, and we have already seen what that costs
+
+**Assumed:** that the clock the job reads is always sane, so an unbounded
+`UPDATE` over every expired booking is safe.
+
+**Affects:** `src/lib/booking/auto-release.ts` → `runAutoRelease()`,
+`src/app/api/cron/jobs/route.ts`, `settings.demo_offset_seconds`.
+
+**This is not hypothetical. It happened during Phase 3.** A test drove
+`runAutoRelease` from a `FixedClock` set to January 2099. From that clock's point
+of view every real booking in the seeded database had finished decades earlier,
+so the job did exactly what it is built to do: **577 bookings were settled as
+`completed_no_show` and the demo floor was emptied**, in one run, with no
+confirmation and nothing to stop it. It was caught because the floor plan looked
+wrong afterwards, not because anything complained.
+
+**Why the current fix is not enough.** `runAutoRelease` now takes an optional
+`onlySeatIds`, and the tests pass it. That closes the test hole and nothing else
+— production never sets it, and the three transitions are still unbounded
+`UPDATE`s with no `LIMIT`, no dry run, and no sanity check on the clock:
+
+```
+confirmed, grace expired, slot running   -> auto_released
+confirmed, past ends_at                  -> completed_no_show
+checked_in, past ends_at                 -> completed
+```
+
+**The production failure modes this leaves open**, none of which need a test to
+reach:
+
+1. **A bad `demo_offset_seconds`.** It is an `integer` column with no bound, set
+   by `POST /api/clock` which accepts any `z.number().int()`. One fat-fingered
+   value — or one demo left running with a large offset — and the next cron tick
+   settles every future booking in the database. `APP_MODE=production` uses
+   `SystemClock` and ignores the offset, so this is a demo-and-staging risk
+   rather than a live one, but demo data is what CBVA will be shown.
+2. **Server clock skew.** In production the job reads the system clock. A host
+   that comes back from suspend, or a container with a wrong clock, has the same
+   effect and no offset to blame.
+3. **A settings edit.** `auto_release_minutes` accepts 5–720 today. Nothing
+   stops it being set far below a slot length, which would release most of a
+   floor within minutes of every slot start.
+
+In all three the job is behaving correctly and the *input* is wrong — which is
+exactly the case a bound is for.
+
+**What to build, in Phase 5 or at production hardening:**
+
+- **A batch cap.** Refuse to settle more than N rows in one run (N ~ the
+  bookable pool, 93) and log loudly instead. A single run legitimately settling
+  more bookings than the floor has desks is not a real workload.
+- **A horizon.** Ignore bookings whose `ends_at` is more than a few days behind
+  "now". Anything older is a backlog to be settled deliberately, not silently.
+- **A dry run.** `runScheduledJobs({ dryRun: true })` returning the counts it
+  *would* apply, so the cron's effect is inspectable before it is trusted — and
+  so this entry can be verified rather than argued about.
+
+**Why it is 🟠 and not 🔴.** Nothing built so far is wrong, the live rule is
+correct, and `APP_MODE=production` does not read the demo offset. But the
+analytics is the deliverable, and a job that can quietly rewrite thousands of
+rows of attendance history is the one piece of this product that can corrupt the
+number CBVA is buying — silently, and in a direction (more no-shows) that looks
+plausible rather than obviously broken.

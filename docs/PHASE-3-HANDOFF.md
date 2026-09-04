@@ -243,6 +243,12 @@ Desk booking is unaffected — desks have no second system.
 A19 also matters for the analytics: a QR check-in proves a booking, not a body in
 a chair. Badge and QR together is the strong pair, and the schema is ready for it.
 
+**The client-facing trio is A1, A16 and A17** — the HR split, Zone B, and who
+owns room booking. None blocks a build phase; together they fix the denominator
+and the room guarantee, and they should go to CBVA as one set rather than being
+raised piecemeal. A22 is ours, not theirs: an engineering bound to add, not a
+question to ask.
+
 ---
 
 ## 8. Verification — all run
@@ -284,6 +290,15 @@ presentable floor.
   `auto_released` (claimed it, released before the slot ended),
   `cancelled_by_user` / `cancelled_after_check_in` (their decision, before or
   after arriving), `cancelled_by_admin` (ours, not evidence about them).
+  **This distinction has to be visible in Phase 5's own status legend, not only
+  in the schema.** Collapsing "left early" or "the firm took the desk back" into
+  a plain no-show is not a display simplification — it corrupts the utilisation
+  figure the whole product exists to produce, in the direction that looks
+  plausible rather than obviously broken.
+- **The auto-release job has no batch cap, horizon or dry run** — ASSUMPTIONS
+  A22, logged with the incident that demonstrated it. It is the one component
+  that can silently rewrite thousands of rows of attendance history, and it
+  should not be trusted in production until it is bounded.
 - **`check_in_method` is the column that makes occupancy honest.** `qr` is desk
   level, `badge` is floor level. Do not blend them.
 - **`audit_log` now has a real vocabulary** — `src/lib/audit.ts` is the one

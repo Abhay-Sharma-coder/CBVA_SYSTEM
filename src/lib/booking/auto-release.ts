@@ -28,6 +28,13 @@
  * And it reads `clock.now()`, never the system clock — which is what makes the
  * demo honest. Advancing the demo clock two hours makes the REAL job run the
  * REAL rule against REAL rows and really release the desk.
+ *
+ * ⚠️ NO BLAST RADIUS BOUND — see ASSUMPTIONS A22. These are unbounded UPDATEs,
+ * so the job settles everything the clock says is expired. That is correct when
+ * the clock is right and catastrophic when it is not: a test driving it from
+ * 2099 settled 577 real bookings in one run during Phase 3. `onlySeatIds` below
+ * closed the test hole only. A batch cap, a horizon and a dry run belong here
+ * before this is trusted in production.
  */
 import { and, eq, gt, inArray, lte } from "drizzle-orm";
 
