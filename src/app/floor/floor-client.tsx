@@ -103,6 +103,18 @@ export function FloorClient() {
    */
   useEffect(() => {
     if (!hydrated.current || activeDate === null) return;
+    // Only ever write the floor screen's own URL.
+    //
+    // Phase 3 stopped this effect from CANCELLING a navigation off /floor by
+    // dropping `router.replace`. It did not stop it from firing after one has
+    // already happened: this component stays mounted through the exit
+    // transition, `usePathname()` has by then moved on, and the effect happily
+    // stamped `/bookings?date=…&slot=AM` — or, once `pathname` had not yet
+    // updated, put /floor back in the address bar over the page the user had
+    // just opened. The shell's navigation spec caught it the same way it caught
+    // the first version, by clicking away during the second it takes the
+    // default date to arrive.
+    if (pathname !== "/floor") return;
     const next = new URLSearchParams();
     next.set("date", activeDate);
     next.set("slot", activeSlot);

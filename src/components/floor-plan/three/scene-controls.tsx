@@ -29,7 +29,11 @@ export function SceneControls({
   onWholeFloor: () => void;
 }) {
   return (
-    <div className="pointer-events-none absolute right-3 bottom-3 flex gap-2">
+    // The demo panel is pinned to the bottom-right of the viewport, and on a
+    // phone it lands squarely on top of these two buttons. Sitting above it
+    // below `sm` costs nothing on a desktop, where the two are nowhere near
+    // each other.
+    <div className="pointer-events-none absolute right-3 bottom-14 flex gap-2 sm:bottom-3">
       <Button
         size="sm"
         variant="secondary"

@@ -216,7 +216,7 @@ labelled control away.
 
 ## 8. Defects, all fixed
 
-Eight, and most of them were the same mistake in different clothes: **assuming a
+Nine, and most of them were the same mistake in different clothes: **assuming a
 cause instead of measuring one.** Every one was settled in the end by sampling a
 pixel, counting a coverage, or reading a frame counter.
 
@@ -283,6 +283,25 @@ pixel, counting a coverage, or reading a frame counter.
    as `[data-seat]`, in the one form a canvas can. Tracing is off for that spec:
    the recorder snapshots the DOM on every one of ~100 pointer moves, which was
    the difference between seconds and a four-minute timeout.
+
+9. **Navigating away from `/floor` put you back on `/floor`.** The shell's
+   navigation spec caught this for the second time. Phase 3 stopped the URL-sync
+   effect from *cancelling* a navigation by dropping `router.replace` for
+   `history.replaceState`; it did not stop it from firing *after* one. The floor
+   client stays mounted through the exit transition, so a click on "My Bookings"
+   during the second it takes the default date to arrive was followed by the
+   effect stamping `/floor?date=…&slot=AM` back over the address bar. The effect
+   now returns early unless `pathname === "/floor"` — it exists to sync one
+   screen's URL and has no business writing any other.
+
+   Worth noting for whoever touches this next: both failures presented as
+   flakiness, because both are races that only lose while the first query is
+   still in flight. Neither reproduces on a warm machine.
+
+10. **The camera buttons sat under the demo panel on a phone.** The panel is
+    pinned to the bottom-right of the viewport and the scene controls to the
+    bottom-right of the canvas, which at 390 px are the same corner. The
+    controls sit a row higher below `sm`.
 
 ---
 
