@@ -13,6 +13,18 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
+  /**
+   * Compiles every route once before the suite. `next dev` builds a route on
+   * first request, and Phase 3 took the app from four routes to ten — without
+   * this, the first navigation to each spends most of its assertion budget in
+   * webpack, and specs pass in a warm order and fail in a cold one.
+   */
+  globalSetup: "./e2e/global-setup.ts",
+  /**
+   * Phase 3's flows are multi-step: sign in, navigate, wait for a mutation to
+   * settle, screenshot. Thirty seconds was written for a suite that only read.
+   */
+  timeout: 60_000,
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",

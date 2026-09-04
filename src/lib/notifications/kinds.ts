@@ -35,7 +35,7 @@ export const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   booking_edited: "Booking changed",
   booking_cancelled: "Booking cancelled",
   auto_released: "Desk auto-released",
-  reminder: "Reminder",
+  reminder: "Check-in reminder",
   room_confirmed: "Room booked",
   room_cancelled: "Room booking cancelled",
 };

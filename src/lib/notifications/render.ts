@@ -299,14 +299,19 @@ export function renderSeatNotification(
     }
 
     case "reminder": {
-      const subject = "Reminder: desk " + c.seatCode + ", " + dateLong;
-      const intro = "A reminder about your desk on " + dateLong + ".";
+      // Sent halfway through the grace window, before anything is taken away.
+      // It has one job: turn a forgotten scan back into a real check-in.
+      const subject = "Check in to " + c.seatCode + " — it is about to be released";
+      const intro =
+        "You have not checked in to " +
+        c.seatCode +
+        " yet, so it is due to be released back to the floor shortly.";
       return {
         subject,
         html: layout(
-          "Desk reminder",
+          "Your desk is about to be released",
           paragraph(intro) + facts,
-          "Scan the QR code on the desk when you sit down — that is what records the desk as used.",
+          "Scan the QR code on the desk to keep it. That scan is also what records the desk as used.",
         ),
         text: plain(subject, [intro, ...seatLines(c)]),
       };

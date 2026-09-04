@@ -12,7 +12,7 @@
  * not write rows any more; the queue owns them, and /admin/notifications reads
  * them. Swapping in Graph in production changes who delivers, not who records.
  */
-import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { mail as defaultMailer } from "@/lib/adapters";
 import type { MailProvider } from "@/lib/adapters/types";
@@ -23,6 +23,15 @@ import type { RenderedNotification } from "@/lib/notifications/render";
 
 /** Give up after this many tries and leave the row `failed` for a human. */
 export const MAX_ATTEMPTS = 3;
+
+/**
+ * How long a claimed message is invisible to other runners.
+ *
+ * Long enough that a slow Graph call cannot have its message stolen mid-send,
+ * short enough that a crashed process does not strand a booking confirmation
+ * for the rest of the afternoon.
+ */
+const CLAIM_LEASE_MINUTES = 5;
 
 /** Backoff between attempts, in minutes: ~1 min, then 5, then 25. */
 function backoffMinutes(attempts: number): number {
@@ -84,9 +93,9 @@ export interface DispatchOptions {
 /**
  * Sends whatever is due.
  *
- * `FOR UPDATE SKIP LOCKED` is what makes this safe to run from the dev
- * interval, a Vercel cron and an admin button at the same time: two runners
- * take disjoint sets of rows rather than both sending the same email.
+ * Safe to run from the dev interval, a Vercel cron and the demo panel's button
+ * at the same time — see the claim below for how, and why the obvious approach
+ * is not enough.
  */
 export async function dispatchNotifications(
   options: DispatchOptions = {},
@@ -99,36 +108,60 @@ export async function dispatchNotifications(
 
   const result: DispatchResult = { attempted: 0, sent: 0, failed: 0 };
 
-  const due = await db.transaction(async (tx) => {
-    const rows = await tx
-      .select()
-      .from(schema.notificationLog)
-      .where(
-        and(
-          eq(schema.notificationLog.status, "queued"),
-          or(
-            isNull(schema.notificationLog.nextAttemptAt),
-            lte(schema.notificationLog.nextAttemptAt, now),
-          ),
-        ),
-      )
-      .orderBy(asc(schema.notificationLog.createdAt))
-      .limit(limit)
-      .for("update", { skipLocked: true });
-    return rows;
-  });
+  /**
+   * CLAIM, then send.
+   *
+   * `SELECT … FOR UPDATE SKIP LOCKED` on its own is not enough here: the lock
+   * dies with the transaction, and the transaction has to commit before the
+   * send happens (a send can take seconds and must not hold a row lock). Two
+   * runners would then select the same rows and send the same email twice —
+   * exactly what an outbox exists to prevent, and the dev interval, the Vercel
+   * cron and the demo panel's button really can overlap.
+   *
+   * So the claim is an UPDATE that pushes `next_attempt_at` a lease ahead,
+   * atomically, over rows taken with SKIP LOCKED. Whoever wins the update owns
+   * them; anybody else skips straight past. If this process dies mid-send the
+   * lease expires and the next run picks them up — at-least-once, which is the
+   * right trade for a booking confirmation.
+   */
+  const leaseUntil = new Date(now.getTime() + CLAIM_LEASE_MINUTES * 60_000);
+  const claimed = await db.execute<typeof schema.notificationLog.$inferSelect>(sql`
+    update ${schema.notificationLog}
+       set next_attempt_at = ${leaseUntil}
+     where id in (
+       select id from ${schema.notificationLog}
+        where status = 'queued'
+          and (next_attempt_at is null or next_attempt_at <= ${now})
+        order by created_at
+        limit ${limit}
+        for update skip locked
+     )
+    returning *
+  `);
+  const due = (claimed.rows ?? []) as Array<typeof schema.notificationLog.$inferSelect>;
 
-  for (const row of due) {
+  for (const raw of due) {
+    // `db.execute` hands back driver rows, which are snake_case.
+    const row = raw as unknown as {
+      id: string;
+      kind: string;
+      subject: string;
+      body: string;
+      attempts: number;
+      recipient_email: string;
+      booking_id: string | null;
+      room_booking_id: string | null;
+    };
     result.attempted += 1;
     const attempts = row.attempts + 1;
     try {
       await mailer.send({
-        to: row.recipientEmail,
+        to: row.recipient_email,
         subject: row.subject,
         body: row.body,
         kind: row.kind,
-        bookingId: row.bookingId ?? undefined,
-        roomBookingId: row.roomBookingId ?? undefined,
+        bookingId: row.booking_id ?? undefined,
+        roomBookingId: row.room_booking_id ?? undefined,
       });
       await db
         .update(schema.notificationLog)

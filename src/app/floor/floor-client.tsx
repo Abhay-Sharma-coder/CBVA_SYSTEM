@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useReducedMotion } from "motion/react";
 
@@ -62,7 +62,6 @@ export function FloorClient() {
      "Have a look at Zone C on Tuesday afternoon" has to be a link, not a list
      of instructions. Date, slot, zone and view all round-trip through the
      query string; the store stays the single reader for the rest of the UI. */
-  const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const hydrated = useRef(false);
@@ -80,6 +79,20 @@ export function FloorClient() {
     if (v === "list" || v === "plan") setView(v);
   }, [params, setActiveDate, setActiveSlot, setActiveZone, setView]);
 
+  /**
+   * Writing the state back to the URL, WITHOUT the router.
+   *
+   * `router.replace()` is a navigation, and a navigation cancels whatever
+   * navigation is already in flight. The default date arrives from
+   * /api/floor/dates about a second after the page loads, so if somebody clicks
+   * "My Bookings" in that window the resulting replace to /floor?date=… aborts
+   * their click and they stay put. It is a race, so it looked like flakiness
+   * rather than a bug — the shell's navigation spec caught it.
+   *
+   * `history.replaceState` is the right tool: this is a URL sync, not a route
+   * change. Next 15 keeps `useSearchParams()` in step with it, and nothing here
+   * re-renders from the query string after the hydrate-once effect above.
+   */
   useEffect(() => {
     if (!hydrated.current || activeDate === null) return;
     const next = new URLSearchParams();
@@ -89,11 +102,11 @@ export function FloorClient() {
     if (view !== "plan") next.set("view", view);
     const query = next.toString();
     if (query !== params.toString()) {
-      // replace, not push: changing slot should not stack up history entries
-      // somebody then has to press Back through.
-      router.replace(`${pathname}?${query}`, { scroll: false });
+      // replaceState, not pushState: changing slot should not stack up history
+      // entries somebody then has to press Back through.
+      window.history.replaceState(null, "", `${pathname}?${query}`);
     }
-  }, [activeDate, activeSlot, activeZone, view, params, pathname, router]);
+  }, [activeDate, activeSlot, activeZone, view, params, pathname]);
 
   const dates = useQuery({
     queryKey: ["floor", "dates"],

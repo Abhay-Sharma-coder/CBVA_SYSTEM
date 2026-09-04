@@ -23,7 +23,13 @@ test("primary navigation reaches every destination", async ({ page }) => {
     ["Meeting Rooms", "/rooms"],
   ] as const) {
     await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: label }).click();
-    await expect(page).toHaveURL(path);
+    // A generous budget on purpose. This asserts that the links go where they
+    // say, not that dev-mode navigation is fast: /bookings and /rooms are
+    // server-rendered and each waits on a round trip to Neon in Singapore
+    // before the App Router commits the URL. The default five seconds made this
+    // pass warm and fail cold, which reads as flakiness rather than as the
+    // latency it is.
+    await expect(page).toHaveURL(path, { timeout: 20_000 });
     await expect(page.getByRole("heading", { level: 1, name: label })).toBeVisible();
   }
 });

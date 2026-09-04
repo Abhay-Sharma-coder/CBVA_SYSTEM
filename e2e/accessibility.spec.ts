@@ -49,6 +49,7 @@ function report(violations: AxeViolation[]) {
  * printed rather than swallowed, so a regression is visible even when the
  * suite is green.
  */
+
 const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
   [
     "floor plan",
@@ -82,6 +83,59 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
     "/admin/floor-plan",
     async (page) => {
       await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
+    },
+  ],
+  /* ---- Phase 3 surfaces ---- */
+  [
+    "my bookings",
+    "/bookings",
+    async (page) => {
+      await page.getByRole("heading", { level: 1, name: "My Bookings" }).waitFor();
+      await page.waitForTimeout(500);
+    },
+  ],
+  [
+    "meeting room grid",
+    "/rooms",
+    async (page) => {
+      // Every hour is a real button in a table with a caption and row headers;
+      // this is the surface most likely to regress into a div grid.
+      await page.getByRole("table").waitFor({ timeout: 30_000 });
+    },
+  ],
+  [
+    "on-behalf person picker",
+    "/floor",
+    async (page) => {
+      await page.locator("[data-seat][data-status='available']").first().waitFor({
+        timeout: 30_000,
+      });
+      await page.locator("[data-seat][data-status='available']").first().click();
+      const dialog = page.getByRole("dialog");
+      await dialog.waitFor();
+      // Only offered to grades that may book for a colleague, so this is a
+      // no-op for personas that cannot — the audit still covers the dialog.
+      const choice = dialog.getByRole("radio", { name: "For a colleague" });
+      if (await choice.isVisible().catch(() => false)) {
+        await choice.click();
+        await dialog.getByRole("combobox", { name: "Colleague" }).click();
+        await dialog.getByRole("listbox").waitFor();
+      }
+    },
+  ],
+  [
+    "demo notification inbox",
+    "/admin/notifications",
+    async (page) => {
+      await page.getByRole("heading", { level: 1, name: "Notifications" }).waitFor();
+      await page.waitForTimeout(500);
+    },
+  ],
+  [
+    "desk QR sheet",
+    "/admin/qr",
+    async (page) => {
+      await page.locator(".qr-card").first().waitFor({ timeout: 30_000 });
     },
   ],
 ];

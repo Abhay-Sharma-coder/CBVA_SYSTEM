@@ -46,14 +46,27 @@ export interface AutoReleaseResult {
   markedNoShow: number;
   /** Slot finished normally after a check-in. Settles the row for analytics. */
   completed: number;
+  /** Nudged halfway through the grace window, before anything was taken away. */
+  remindersQueued: number;
   releasedSeatCodes: string[];
 }
 
 export interface AutoReleaseOptions {
   db: Db;
   clock: Clock;
-  /** Cap on rows per transition, so one run can never take an unbounded lock set. */
-  limit?: number;
+  /**
+   * Restricts the run to bookings on these desks.
+   *
+   * THE JOB IS GLOBAL BY DESIGN — it has to be, because it settles every
+   * booking whose grace window has expired, and a per-tenant or per-floor scope
+   * would just be a way to forget one. That is also a trap for tests: a spec
+   * that drives it from a fixed clock set years away will settle the ENTIRE
+   * seeded database, because from that clock's point of view every real booking
+   * finished long ago. This is what those tests pass, and it is why it exists.
+   *
+   * Production never sets it.
+   */
+  onlySeatIds?: string[];
 }
 
 export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoReleaseResult> {
@@ -61,13 +74,34 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
   const now = clock.now();
   const settings = await getSettings(db);
   const graceMs = settings.autoReleaseMinutes * 60_000;
+  const scope = options.onlySeatIds
+    ? inArray(schema.bookings.seatId, options.onlySeatIds)
+    : undefined;
 
   const result: AutoReleaseResult = {
     released: 0,
     markedNoShow: 0,
     completed: 0,
+    remindersQueued: 0,
     releasedSeatCodes: [],
   };
+
+  /* --------------------------------------------------------------- remind
+   *
+   * Halfway through the grace window, tell people their desk is about to go.
+   *
+   * Taking a desk away from somebody who simply forgot to scan is a poor
+   * outcome for them and a poor number for us — it lands in the analytics as a
+   * no-show, which is supposed to mean "did not come in". One nudge before the
+   * release turns some of those back into real check-ins, which is the entire
+   * point of measuring occupancy rather than intent.
+   *
+   * The window is strictly between the halfway mark and the release threshold,
+   * so it cannot overlap the release below. `reminder` also carries the partial
+   * unique index on (kind, booking_id, recipient_email), so a job running every
+   * sixty seconds across that window sends exactly one.
+   */
+  result.remindersQueued = await queueReminders(db, now, graceMs, scope, settings.slotDefinitions);
 
   /* ---------------------------------------------------------------- release
    *
@@ -84,6 +118,7 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
         eq(schema.bookings.status, "confirmed"),
         lte(schema.bookings.startsAt, new Date(now.getTime() - graceMs)),
         gt(schema.bookings.endsAt, now),
+        scope,
       ),
     )
     .returning();
@@ -98,7 +133,7 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
   const noShow = await db
     .update(schema.bookings)
     .set({ status: "completed_no_show", releasedAt: now, updatedAt: now })
-    .where(and(eq(schema.bookings.status, "confirmed"), lte(schema.bookings.endsAt, now)))
+    .where(and(eq(schema.bookings.status, "confirmed"), lte(schema.bookings.endsAt, now), scope))
     .returning({ id: schema.bookings.id, seatId: schema.bookings.seatId });
 
   /* -------------------------------------------------------------- complete
@@ -111,7 +146,7 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
   const completed = await db
     .update(schema.bookings)
     .set({ status: "completed", updatedAt: now })
-    .where(and(eq(schema.bookings.status, "checked_in"), lte(schema.bookings.endsAt, now)))
+    .where(and(eq(schema.bookings.status, "checked_in"), lte(schema.bookings.endsAt, now), scope))
     .returning({ id: schema.bookings.id });
 
   result.released = released.length;
@@ -247,4 +282,74 @@ async function bookerEmailsFor(
     .from(schema.users)
     .where(inArray(schema.users.id, ids));
   return new Map(users.map((u) => [u.id, u.email]));
+}
+
+/**
+ * One nudge per booking, halfway through its grace window.
+ *
+ * Deliberately a select-then-enqueue rather than an UPDATE: nothing about the
+ * booking changes, so there is no status to move. Idempotency comes from the
+ * database instead — `notification_log_job_kind_once` covers `reminder`, and
+ * `enqueueNotification` swallows that conflict because "already queued" is the
+ * right outcome for a job that runs every minute, not an error.
+ */
+async function queueReminders(
+  db: Db,
+  now: Date,
+  graceMs: number,
+  scope: ReturnType<typeof inArray> | undefined,
+  slotDefinitions: readonly SlotDefinition[],
+): Promise<number> {
+  const rows = await db
+    .select({
+      bookingId: schema.bookings.id,
+      bookingDate: schema.bookings.bookingDate,
+      slot: schema.bookings.slot,
+      seatCode: schema.seats.seatCode,
+      bay: schema.seats.bay,
+      zoneCode: schema.zones.code,
+      occupantEmail: schema.users.email,
+      occupantName: schema.users.displayName,
+    })
+    .from(schema.bookings)
+    .innerJoin(schema.seats, eq(schema.bookings.seatId, schema.seats.id))
+    .innerJoin(schema.zones, eq(schema.seats.zoneId, schema.zones.id))
+    .innerJoin(schema.users, eq(schema.bookings.occupantUserId, schema.users.id))
+    .where(
+      and(
+        eq(schema.bookings.status, "confirmed"),
+        // Past halfway...
+        lte(schema.bookings.startsAt, new Date(now.getTime() - graceMs / 2)),
+        // ...but not yet due for release, which the statement below handles.
+        gt(schema.bookings.startsAt, new Date(now.getTime() - graceMs)),
+        gt(schema.bookings.endsAt, now),
+        scope,
+      ),
+    )
+    .limit(200);
+
+  for (const row of rows) {
+    const slot = slotDefinitions.find((d) => d.key === row.slot) ?? {
+      key: row.slot,
+      label: row.slot,
+      start: "",
+      end: "",
+    };
+    await enqueueNotification(db, {
+      kind: "reminder",
+      to: row.occupantEmail,
+      bookingId: row.bookingId,
+      rendered: renderSeatNotification("reminder", {
+        occupantName: row.occupantName,
+        bookerName: row.occupantName,
+        onBehalf: false,
+        seatCode: row.seatCode,
+        zone: row.zoneCode,
+        bay: row.bay,
+        bookingDate: row.bookingDate,
+        slot,
+      }),
+    });
+  }
+  return rows.length;
 }

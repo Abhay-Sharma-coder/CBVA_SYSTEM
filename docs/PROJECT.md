@@ -37,19 +37,31 @@ The Manager/Assistant Manager split that produces those numbers is an assumption
 
 ## 3. Core rules
 
-- A desk is booked for a **slot**: AM or PM. A full day is two bookings on the
-  same desk.
+- A desk is booked for a **slot**. The slots are **data**, not a fixed pair:
+  `settings.slot_definitions` is an ordered list of named time ranges, seeded as
+  AM 09:00–13:00 and PM 13:00–17:00. A full day is two bookings on the same
+  desk. Moving the firm to hourly booking is a settings change (ADR-020).
 - **One active booking per desk, per date, per slot.** Enforced by the database.
+- **One desk per person, per date, per slot.** Also enforced by the database,
+  and keyed on the *occupant* — so booking for a colleague who is free is
+  allowed, and booking a second desk for yourself is not (ADR-022).
 - Cancelling or auto-releasing frees the slot **without deleting the row** — the
   history is the analytics.
 - **Auto-release**: a booking not checked into within the grace window
   (`settings.auto_release_minutes`, 120) is released back into the pool
   automatically and marked `auto_released`. Past the slot it settles to
   `completed_no_show`.
-- **Check-in** comes from a badge swipe at the door (`badge_events`), or from
-  the app. Check-in is what turns a booking into evidence of occupancy — an
-  uncheckd-in booking is a claim, not a fact, and the analytics must keep the
-  two apart.
+- **Check-in** comes from a badge swipe at the door (`badge_events`), from a QR
+  code on the desk, or from the app, and `bookings.check_in_method` records
+  which. Check-in is what turns a booking into evidence of occupancy — an
+  un-checked-in booking is a claim, not a fact, and the analytics must keep the
+  two apart. It must also keep the *kinds* of evidence apart: a door swipe
+  proves somebody reached the floor, a desk QR proves they used that desk.
+- **The cut-off** (`settings.cutoff_minutes`) closes edit and cancel before a
+  slot starts. It does not stop somebody booking a desk mid-slot — that is how
+  an auto-released desk gets used — and it does not apply to a booking somebody
+  has already checked into, because releasing a desk you are leaving hands the
+  rest of the slot back to the floor.
 - Meeting rooms are booked as **arbitrary time ranges**, not slots. Overlaps are
   rejected by the database.
 - Weekends and rows in `holidays` are not bookable.
@@ -88,7 +100,7 @@ Load-bearing details:
 |---|---|---|
 | `AuthProvider` | Microsoft Entra ID | Tenant app registration |
 | `MailProvider` | Graph `sendMail` | `Mail.Send` consent + service account |
-| `CalendarSync` | Graph `/events` | Room resource mailbox list |
+| `CalendarSync` | Graph `/events` | Room resource mailbox list — **and a decision about who owns room booking, see A17** |
 | `CheckInSource` | Badge reader webhook | Vendor and export format unknown |
 
 Each has a demo implementation good enough to demonstrate the whole flow and a
@@ -133,12 +145,22 @@ flagged as such. `/floor` renders the linework as one raster with 141 real
 the URL. `/admin/floor-plan` drags, rotates and retires desks and exports the
 corrections back to the committed geometry.
 
-**Phase 3 — Booking engine**
-Book / amend / cancel against the database constraints, treating `23505` and
-`23P01` as ordinary "someone just took that seat" outcomes. Meeting room
-booking over arbitrary ranges. The auto-release job. Check-in from badge and
-app. Notifications through `MailProvider` into `notification_log`. Fix ADR-007's
-`starts_at` drift before slot definitions become editable.
+**Phase 3 — Booking engine ✅**
+Book, amend and cancel against the database constraints, with `23505` and
+`23P01` handled as ordinary "someone just took that desk" outcomes. Editing is a
+cancel-and-rebook inside one transaction, so a lost race leaves the original
+booking intact. On-behalf booking for managers and above. Meeting rooms over
+arbitrary ranges, with a one-way calendar sync that cannot lose a booking when
+Graph is down. Auto-release as one conditional `UPDATE … RETURNING` per
+transition — idempotent, concurrency-safe, and driven by the shared Clock, so
+advancing the demo clock makes the real job run the real rule. Real QR check-in
+at `/checkin/<seat_code>` with a printable sticker sheet. Eight notification
+kinds as real HTML, queued inside the booking transaction and viewable at
+`/admin/notifications`. ADR-007's `starts_at` drift is closed: editing slot
+definitions backfills every affected booking in the same transaction.
+
+The brief's eighteen edge cases are `tests/integration/phase3-edge-cases.test.ts`,
+numbered to match. 138 tests, up from 83.
 
 **Phase 4 — 3D floor plan**
 R3F v9 `mode="3d"` inside the existing `<FloorPlan>`, over the same seat array,
@@ -156,7 +178,7 @@ outbox. Full accessibility pass. Deploy.
 
 ## 9. Open questions
 
-See `ASSUMPTIONS.md`. The four that block real use:
+See `ASSUMPTIONS.md`. The five that block real use:
 
 1. **The HR list** — how the 54 CAs split Manager / Assistant Manager, and who
    holds an allocated seat. This sets the denominator for every number the
@@ -165,7 +187,16 @@ See `ASSUMPTIONS.md`. The four that block real use:
    Now visible: the plan draws 47 specific desks as reserved, in their real
    positions.
 3. **The real meeting rooms** — names, capacities and Outlook resource mailboxes.
-4. **Does anybody sit in Zone B?** Phase 2 detected 33 unclaimed chairs in the
+4. **Who owns meeting room booking — this app, or Outlook?** If the six rooms
+   already exist as Outlook resource mailboxes, staff will go on booking them
+   from Outlook, our grid will show the hour free, and two groups will arrive.
+   Our exclusion constraint is airtight for bookings made here and blind to
+   bookings made there, and the calendar sync is one-way. CBVA has to choose
+   exclusive booking rights for this app or two-way sync. Full statement in
+   ASSUMPTIONS A17. **This is new in Phase 3 and it is the one that can
+   embarrass the product in front of staff.**
+
+5. **Does anybody sit in Zone B?** Phase 2 detected 33 unclaimed chairs in the
    north-west wing, which the drawing marks "NO CHANGE AREA", labels "MODULAR
    FURNITURE" and gives no pax count. Zone A's 46 unclaimed chairs *are*
    explained — boardroom, conference rooms and reception lounge — but Zone B's

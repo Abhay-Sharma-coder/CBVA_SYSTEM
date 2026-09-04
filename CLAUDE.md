@@ -14,8 +14,8 @@ desks against headcount. Design every decision with that in mind.
 
 1. **Foundation** — repo, design system, schema, adapters, clock, seed ✅ done
 2. **CAD geometry pipeline and the interactive 2D floor plan** ✅ done
-3. Booking engine, meeting rooms, auto-release, notifications ← next
-4. 3D floor plan view
+3. **Booking engine, meeting rooms, auto-release, notifications** ✅ done
+4. 3D floor plan view ← next
 5. Admin analytics, seat inventory, accessibility pass, deploy
 
 ---
@@ -42,6 +42,7 @@ Every dependency is pinned to an exact version in `package.json` (no `^`).
 | three | 0.182.0 | Phase 4 |
 | @react-three/fiber | 9.7.0 | **v9, not the v10 alpha.** v8 does not work with React 19 |
 | @react-three/drei | 10.7.8 | Phase 4 |
+| qrcode | 1.5.4 | Phase 3 addition, not a substitution. Renders the per-desk check-in codes as SVG, server-side — see ADR-028 |
 
 Radix primitives, `lucide-react`, `class-variance-authority`, `clsx` and
 `tailwind-merge` back the shadcn-style components in `src/components/ui/`.
@@ -75,6 +76,70 @@ becomes deterministic for free.
 
 Client code reads "now" from `GET /api/clock`, never from the browser's own
 `Date`, so client and server never disagree about whether a slot has started.
+
+---
+
+## THE SLOT RULE
+
+**Slots are data, not a type.** `settings.slot_definitions` is an ordered list of
+`{key, label, start, end}`; `bookings.slot` is `text`. Seeded as AM 09:00–13:00
+and PM 13:00–17:00.
+
+The brief requires that moving CBVA to hourly booking be a settings change and
+not a refactor, and a two-value enum makes that impossible — `H09` is not a legal
+value. So:
+
+- **Never reintroduce a closed slot union.** `SlotKey` is `string`. A `"AM" |
+  "PM"` anywhere is the bug this rule exists to prevent.
+- **`deriveSlotBounds()` in `src/lib/slots.ts` is still the only place
+  `starts_at`/`ends_at` are computed.** The seed had grown a private second copy;
+  it is gone. Do not add a third.
+- **Editing slot definitions backfills.** `updateSettings()` recomputes every
+  live booking's stored bounds in the same transaction, and refuses a change that
+  would orphan a booking whose slot key disappears (ADR-021, closing ADR-007).
+- `tests/integration/hourly-slots.test.ts` proves the whole lifecycle works on a
+  slot key that did not exist when the code was written. It is the regression
+  test for this rule.
+
+---
+
+## THE WRITE RULES
+
+**No app-level "is this seat free?" check exists, and none may be added.** Both
+integrity rules are in the database (ADR-003, ADR-022) because a read-then-write
+has a race window and two people tapping Book at the same moment is exactly the
+case that must not double-book. `23505` and `23P01` are **ordinary outcomes**,
+mapped in `src/lib/booking/errors.ts` to sentences a person can act on.
+
+`mapPgError` unwraps `.cause`: Drizzle raises a `DrizzleQueryError` carrying the
+driver's error underneath, and reading the top level finds no SQLSTATE at all.
+That failure only appears under real concurrency, so it is easy to reintroduce
+and hard to notice.
+
+**Every service function takes `db`, `Clock` and actor as arguments.** Not
+ceremony: `auth()` reads `next/headers` and throws outside a request, the
+concurrency proofs need two sessions on the direct endpoint, and the timing cases
+need an injectable clock. Route handlers resolve all three and call in.
+
+**Editing a booking is a cancel-and-rebook inside one transaction**, so a lost
+race rolls back and leaves the original booking intact (ADR-023).
+
+**`runAutoRelease` is global by design and takes an optional `onlySeatIds` for
+tests only.** A test that drives it from a fixed clock years away will otherwise
+settle the entire seeded database — it did exactly that once.
+
+---
+
+## THE NOTIFICATION RULE
+
+**`notification_log` is the outbox, not a log of what a provider already did.**
+Messages are rendered and inserted **inside** the booking transaction with
+`status = 'queued'`; delivery happens afterwards and its failures are recorded on
+the message, never propagated. `MailProvider` is only a transport —
+`DemoMailProvider` writes no rows.
+
+So: a committed booking always has its message, a send failure can never roll
+back a booking, and the retry path is real rather than decorative.
 
 ---
 
@@ -196,6 +261,17 @@ src/
   lib/seat-visual-status.ts  (seat, booking, viewer) -> one of the 7 statuses
   lib/seed-data/          inventory.ts, names.ts, holidays.ts, rng.ts
   lib/store/ui.ts         zustand — client UI state only
+  lib/booking/            errors · authorise · rules · service · auto-release · queries · badge
+  lib/rooms/              validation (the Zod layer) · service (grid, book, cancel, retry)
+  lib/notifications/      kinds · render (HTML templates) · outbox (enqueue + dispatch)
+  lib/admin/              settings-service (the slot backfill) · seat-lifecycle
+  lib/jobs/run-jobs.ts    auto-release + notification dispatch + calendar retry
+  lib/settings.ts         the one reader of the settings singleton
+  lib/api.ts              the HTTP boundary: actor, zod, error -> status
+  lib/qr.ts               per-desk check-in URLs and SVG codes
+  components/booking/     person-picker, edit dialog, the mutation hooks
+  components/demo/        demo-panel — every demo affordance, in one place
+  instrumentation.ts      + instrumentation-node.ts: the dev job interval
 drizzle/                  0000_initial_schema.sql (generated) + 0001_constraints.sql (hand-written)
 scripts/                  seed.ts, migrate.ts, reset-db.ts
 tests/                    unit/, integration/ (the constraint + concurrency proofs)
@@ -240,7 +316,9 @@ npm run lint
 npm run db:reset     # drop + recreate public schema (destructive)
 npm run db:migrate
 npm run seed         # idempotent; refuses to run with APP_MODE=production
-npm test             # vitest — includes the DB constraint + concurrency proofs
+npm run jobs:run     # run auto-release / notifications / calendar retry once
+npm run db:backfill-slots   # recompute starts_at/ends_at from settings
+npm test             # vitest — constraint proofs + the 18 edge cases
 npm run e2e          # playwright
 ```
 
@@ -253,3 +331,8 @@ npm run e2e          # playwright
 - Zod validates every input boundary (API routes, env).
 - `numeric`/`date` columns come back from `pg` as strings — that is deliberate,
   not a bug to "fix".
+- **The e2e suite mutates demo data on purpose** — the walkthrough books,
+  cancels and auto-releases real rows. Run `npm run seed` afterwards to restore
+  a presentable floor.
+- `CRON_SECRET` protects `POST /api/cron/jobs`. Optional in demo, required in
+  production, compared in constant time.

@@ -108,6 +108,18 @@ afterEach(async () => {
   await clearBookings(db, f);
 });
 
+/**
+ * The desks this file owns.
+ *
+ * Handed to `runAutoRelease` so a clock set in 2099 settles only these rows.
+ * The job is global by design — from a 2099 clock every real booking in the
+ * seeded database finished decades ago, so an unscoped run would mark the whole
+ * demo as a no-show. It did exactly that once, which is why this exists.
+ */
+function seatIds(): string[] {
+  return [f.seatA.id, f.seatB.id];
+}
+
 /* ========================================================================= */
 
 describe("1 — two people book the same desk at the same moment", () => {
@@ -167,13 +179,13 @@ describe("2 — auto-release runs twice on the same booking", () => {
     // Grace window is 120 minutes; step one minute past it, still inside the slot.
     clock.set(new Date(MONDAY_AM_START.getTime() + 121 * MINUTE));
 
-    const first = await runAutoRelease({ db, clock });
+    const first = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
     expect(first.released).toBe(1);
 
     const afterFirst = await bookingById(db, booked.booking.id);
     expect(afterFirst!.status).toBe("auto_released");
 
-    const second = await runAutoRelease({ db, clock });
+    const second = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
     expect(second.released, "the second run has nothing left to do").toBe(0);
     expect(second.markedNoShow).toBe(0);
 
@@ -189,6 +201,51 @@ describe("2 — auto-release runs twice on the same booking", () => {
   });
 });
 
+describe("2b — the nudge before the release", () => {
+  /**
+   * Not one of the eighteen, but the reason `reminder` exists as a kind.
+   *
+   * Taking a desk from somebody who simply forgot to scan lands in the
+   * analytics as a no-show, which is supposed to mean "did not come in". One
+   * message halfway through the grace window turns some of those back into real
+   * check-ins — which is the difference between measuring occupancy and
+   * measuring intent.
+   */
+  it("goes out once, halfway through the grace window, and not again", async () => {
+    const clock = freshClock();
+    await createBooking(ctx(f.article, clock), {
+      seatCode: f.seatA.code,
+      bookingDate: MONDAY,
+      slot: "AM",
+    });
+
+    // Too early: nothing yet.
+    clock.set(new Date(MONDAY_AM_START.getTime() + 30 * MINUTE));
+    expect((await runAutoRelease({ db, clock, onlySeatIds: seatIds() })).remindersQueued).toBe(0);
+    expect(await messagesFor(db, f, "reminder")).toHaveLength(0);
+
+    // Halfway through the 120-minute window.
+    clock.set(new Date(MONDAY_AM_START.getTime() + 65 * MINUTE));
+    expect((await runAutoRelease({ db, clock, onlySeatIds: seatIds() })).remindersQueued).toBe(1);
+    expect(await messagesFor(db, f, "reminder")).toHaveLength(1);
+
+    // The job runs every sixty seconds. It must not send sixty reminders.
+    clock.set(new Date(MONDAY_AM_START.getTime() + 90 * MINUTE));
+    await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
+    await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
+    expect(
+      await messagesFor(db, f, "reminder"),
+      "the partial unique index makes this once-only",
+    ).toHaveLength(1);
+
+    // And past the window the release takes over, with no further nudging.
+    clock.set(new Date(MONDAY_AM_START.getTime() + 121 * MINUTE));
+    const released = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
+    expect(released.released).toBe(1);
+    expect(released.remindersQueued).toBe(0);
+  });
+});
+
 describe("3 — auto-release runs on a booking whose slot already ended", () => {
   it("settles it as completed_no_show rather than releasing a slot that is over", async () => {
     const clock = freshClock();
@@ -200,7 +257,7 @@ describe("3 — auto-release runs on a booking whose slot already ended", () => 
 
     clock.set(new Date(MONDAY_AM_END.getTime() + MINUTE));
 
-    const result = await runAutoRelease({ db, clock });
+    const result = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
     expect(result.released, "there is no remaining time to give anybody").toBe(0);
     expect(result.markedNoShow).toBe(1);
 
@@ -239,7 +296,7 @@ describe("4 — auto-release must not touch a checked-in or cancelled booking", 
 
     // Well past the grace window, but still inside the slot.
     clock.set(new Date(MONDAY_AM_START.getTime() + 150 * MINUTE));
-    const result = await runAutoRelease({ db, clock });
+    const result = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
 
     expect(result.released).toBe(0);
     expect((await bookingById(db, checkedIn.booking.id))!.status).toBe("checked_in");
@@ -771,12 +828,12 @@ describe("18 — the demo clock is wound backwards", () => {
     });
 
     clock.set(new Date(MONDAY_AM_START.getTime() + 121 * MINUTE));
-    expect((await runAutoRelease({ db, clock })).released).toBe(1);
+    expect((await runAutoRelease({ db, clock, onlySeatIds: seatIds() })).released).toBe(1);
     const released = await bookingById(db, booked.booking.id);
 
     // Wind back to before the slot even started.
     clock.set(new Date(MONDAY_AM_START.getTime() - 4 * HOUR));
-    const rewound = await runAutoRelease({ db, clock });
+    const rewound = await runAutoRelease({ db, clock, onlySeatIds: seatIds() });
     expect(rewound).toMatchObject({ released: 0, markedNoShow: 0, completed: 0 });
 
     const after = await bookingById(db, booked.booking.id);

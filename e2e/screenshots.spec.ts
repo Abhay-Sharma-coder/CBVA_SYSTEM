@@ -6,6 +6,11 @@ const PAGES = [
   ["styleguide", "/styleguide"],
   ["floor", "/floor"],
   ["admin-floor-plan", "/admin/floor-plan"],
+  /* ---- Phase 3 ---- */
+  ["bookings", "/bookings"],
+  ["rooms", "/rooms"],
+  ["admin-notifications", "/admin/notifications"],
+  ["admin-qr", "/admin/qr"],
 ] as const;
 
 const WIDTHS = [
@@ -28,10 +33,17 @@ async function settle(page: Page, path: string) {
     await page.locator("header time").waitFor();
   }
   await page.waitForLoadState("networkidle");
-  if (path.includes("floor")) {
+  if (path === "/floor" || path === "/admin/floor-plan") {
     await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
     // The plan springs into its fit-to-floor framing on mount.
     await page.waitForTimeout(900);
+  }
+  if (path === "/rooms") {
+    await page.getByRole("table").waitFor({ timeout: 30_000 });
+  }
+  if (path === "/admin/qr") {
+    // 93 QR codes are generated server-side; the last one is the signal.
+    await page.locator(".qr-card").last().waitFor({ timeout: 30_000 });
   }
 }
 

@@ -158,12 +158,30 @@ export function NotificationsClient() {
                       selected?.id === m.id ? "bg-navy-tint" : "hover:bg-surface-sunken",
                     )}
                   >
+                    {/*
+                      ink-subtle measures 4.21:1 on navy-tint, under AA — the
+                      same trap Phase 2 hit on the selected date chip. The
+                      selected row steps up to ink-muted rather than losing the
+                      tint that marks it.
+                    */}
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-ink-subtle">{m.recipientEmail}</span>
+                      <span
+                        className={cn(
+                          "truncate text-xs",
+                          selected?.id === m.id ? "text-ink-muted" : "text-ink-subtle",
+                        )}
+                      >
+                        {m.recipientEmail}
+                      </span>
                       <Badge variant={STATUS_VARIANT[m.status] ?? "neutral"}>{m.status}</Badge>
                     </span>
                     <span className="mt-1 block truncate text-sm text-ink">{m.subject}</span>
-                    <span className="mt-0.5 block text-[11px] text-ink-subtle tabular">
+                    <span
+                      className={cn(
+                        "mt-0.5 block text-[11px] tabular",
+                        selected?.id === m.id ? "text-ink-muted" : "text-ink-subtle",
+                      )}
+                    >
                       {formatInTimeZone(new Date(m.createdAt), TZ, "d MMM HH:mm")}
                       {m.attempts > 0 ? ` · ${m.attempts} attempt${m.attempts === 1 ? "" : "s"}` : ""}
                     </span>

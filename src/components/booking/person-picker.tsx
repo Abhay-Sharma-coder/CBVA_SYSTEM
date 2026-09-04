@@ -176,10 +176,19 @@ export function PersonPicker({
           aria-label="Bookable colleagues"
           className="max-h-56 overflow-y-auto rounded-sm border border-hairline bg-surface"
         >
+          {/*
+            A role="listbox" may only contain role="option" children, so the
+            loading and empty states are options too, marked aria-disabled.
+            Plain <li>s here read to axe as a critical aria-required-children
+            violation and to a screen reader as a listbox that momentarily
+            contains nothing it can describe.
+          */}
           {isLoading ? (
-            <li className="px-3 py-2 text-sm text-ink-subtle">Loading…</li>
+            <li role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-ink-muted">
+              Loading…
+            </li>
           ) : people.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-ink-subtle">
+            <li role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-ink-muted">
               Nobody bookable matches “{query}”.
             </li>
           ) : (

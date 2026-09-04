@@ -75,14 +75,19 @@ test("hovering a seat shows its card", async ({ page }) => {
 
 test("clicking an available seat opens the booking flow", async ({ page }) => {
   await openFloor(page);
-  const messages: string[] = [];
-  page.on("console", (m) => messages.push(m.text()));
+  const seat = page.locator("[data-seat][data-status='available']").first();
+  const seatCode = await seat.getAttribute("data-seat");
 
-  await page.locator("[data-seat][data-status='available']").first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("dialog")).toContainText("Phase 3");
-  // Phase 2 logs the intent; Phase 3 replaces this with the write.
-  expect(messages.some((m) => m.includes("booking intent"))).toBe(true);
+  await seat.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  // The seat, date and slot are spelled out before anybody commits to them.
+  await expect(dialog).toContainText(`Book seat ${seatCode}`);
+  await expect(dialog.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
+  // exact: the dialog also has a "Close dialog" X, and the default substring
+  // match resolves to both.
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
 });
 
 test("changing the slot reloads seat states", async ({ page }) => {
@@ -119,7 +124,17 @@ test("fit to floor and keyboard zoom work", async ({ page }) => {
 
   await page.getByRole("button", { name: "Fit to floor" }).click();
   await page.waitForTimeout(900);
-  expect(await layer.evaluate((el) => getComputedStyle(el).transform)).toBe(initial);
+  // Compared with a tolerance rather than as a string. The fit is computed from
+  // the measured container, so a sub-pixel difference in layout — a scrollbar,
+  // a font metric — moves the translation by a fraction and an exact string
+  // comparison fails on a difference nobody could see.
+  const refit = await layer.evaluate((el) => getComputedStyle(el).transform);
+  const numbers = (m: string) => (m.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+  const [a, b] = [numbers(initial), numbers(refit)];
+  expect(b).toHaveLength(a.length);
+  for (const [i, value] of a.entries()) {
+    expect(Math.abs(value - b[i]!), `transform component ${i}`).toBeLessThan(1);
+  }
 });
 
 test("the list view carries the same seats and can be filtered", async ({ page }) => {
@@ -144,7 +159,9 @@ test("the occupancy count is always visible", async ({ page }) => {
 test("the date strip skips weekends and holidays", async ({ page }) => {
   await openFloor(page);
   const days = page.getByRole("radiogroup", { name: "Booking date" }).getByRole("radio");
-  await expect(days).toHaveCount(6);
+  // settings.booking_window_working_days, which Phase 3 made the enforced rule
+  // rather than a display limit. Five, not the six the Phase 2 strip showed.
+  await expect(days).toHaveCount(5);
   const labels = await days.allInnerTexts();
   expect(labels.join(" ")).not.toMatch(/\bSat\b|\bSun\b/);
 });

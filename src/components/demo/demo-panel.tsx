@@ -107,7 +107,7 @@ export function DemoPanel() {
       <button
         type="button"
         onClick={toggleDemoPanel}
-        className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-sm border border-hairline bg-surface px-3 py-2 text-xs text-ink-muted shadow-hairline hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy"
+        className="print:hidden fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-sm border border-hairline bg-surface px-3 py-2 text-xs text-ink-muted shadow-hairline hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy"
       >
         <FlaskConical className="size-3.5" aria-hidden="true" />
         Demo controls
@@ -121,7 +121,7 @@ export function DemoPanel() {
   return (
     <aside
       aria-label="Demo controls"
-      className="fixed right-4 bottom-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-md border border-hairline bg-surface shadow-hairline"
+      className="print:hidden fixed right-4 bottom-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-md border border-hairline bg-surface shadow-hairline"
     >
       <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-3">
         <div>
