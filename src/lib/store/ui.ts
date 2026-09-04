@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { FloorPlanView, SlotKey } from "@/components/floor-plan/types";
+import type { FloorPlanMode, FloorPlanView, SlotKey } from "@/components/floor-plan/types";
 import type { ZoneCode } from "@/lib/floorplan";
 
 /**
@@ -8,9 +8,10 @@ import type { ZoneCode } from "@/lib/floorplan";
  * the clock — belongs in TanStack Query, not here. Keeping that line sharp is
  * what stops the two stores drifting apart in Phase 3.
  *
- * Phase 4's 3D view reads this same store: which seat is focused, which date
- * and slot, which zone. Only `viewport` is 2D-specific, and the 3D camera will
- * sit beside it rather than replacing it.
+ * The 3D view reads this same store: which seat is focused, which is selected,
+ * which date and slot, which zone. Only `viewport` is 2D-specific. Selecting a
+ * seat in 3D and switching to 2D leaves the same seat selected, because there
+ * is one value and not two.
  */
 interface Viewport {
   /** Plan units per CSS pixel is 1/scale; scale 1 means 1 plan unit = 1 px. */
@@ -45,6 +46,14 @@ interface UiState {
   view: FloorPlanView;
   setView: (view: FloorPlanView) => void;
 
+  /**
+   * 2D or 3D. Defaults to 2D everywhere, including on a phone that could show
+   * 3D perfectly well: the plan is the keyboard-operable, print-legible one, so
+   * 3D is something you choose rather than something you land in.
+   */
+  mode: FloorPlanMode;
+  setMode: (mode: FloorPlanMode) => void;
+
   viewport: Viewport;
   setViewport: (v: Viewport) => void;
 
@@ -66,6 +75,8 @@ export const useUiStore = create<UiState>((set) => ({
   setActiveZone: (zone) => set({ activeZone: zone }),
   view: "plan",
   setView: (view) => set({ view }),
+  mode: "2d",
+  setMode: (mode) => set({ mode }),
   viewport: { scale: 1, x: 0, y: 0 },
   setViewport: (viewport) => set({ viewport }),
   demoPanelOpen: false,

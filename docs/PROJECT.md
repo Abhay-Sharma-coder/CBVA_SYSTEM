@@ -3,7 +3,7 @@
 CBV & Associates LLP, Mumbai. Office seat and meeting room booking.
 
 Keep this current. It describes what the product **is**, not what has been
-built — `PHASE-1-HANDOFF.md` covers the latter.
+built — the `PHASE-N-HANDOFF.md` docs cover the latter.
 
 ---
 
@@ -160,12 +160,16 @@ kinds as real HTML, queued inside the booking transaction and viewable at
 definitions backfills every affected booking in the same transaction.
 
 The brief's eighteen edge cases are `tests/integration/phase3-edge-cases.test.ts`,
-numbered to match. 138 tests, up from 83.
+numbered to match. 139 tests, up from 83.
 
-**Phase 4 — 3D floor plan**
+**Phase 4 — 3D floor plan** ✅
 R3F v9 `mode="3d"` inside the existing `<FloorPlan>`, over the same seat array,
-the same store and the same status vocabulary. `walls.json` is 252 pre-simplified
-polygons ready to extrude, and `meta.json.mmPerUnit` converts to real dimensions.
+the same store and the same status vocabulary. The floor is the architect's own
+baked drawing on one textured plane; the shell is `walls.json`, now split into
+wall, partition and glazing and extruded as merged segment boxes; the 141 desks
+and chairs are instanced primitives carrying booking status. 12 draw calls.
+three and drei are lazily loaded, so `/floor` costs 6 kB more than it did.
+Selecting a desk in 3D selects it in 2D, because it is one value.
 
 **Phase 5 — Admin analytics and deploy**
 ⚠️ The headline number — peak observed occupancy against the bookable pool —

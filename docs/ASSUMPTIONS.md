@@ -509,3 +509,72 @@ analytics is the deliverable, and a job that can quietly rewrite thousands of
 rows of attendance history is the one piece of this product that can corrupt the
 number CBVA is buying — silently, and in a direction (more no-shows) that looks
 plausible rather than obviously broken.
+
+---
+
+### A23 — 🟡 Every vertical dimension in the 3D view is invented
+
+**Assumed:** walls 2.7 m, partitions 1.35 m, glazing 2.7 m, desks 0.74 m high
+and 1.30 × 0.75 m, chairs 0.45 m to the seat. Wall extrusion widths are 70 mm
+for structure, 55 mm for partitions and 40 mm for glazing.
+
+**Affects:** `src/components/floor-plan/three/coords.ts` → `DIMENSIONS`.
+
+**Why it matters:** the drawing is a plan. It carries no section, no ceiling
+height and no furniture schedule with dimensions, so nothing in it says how tall
+anything is. The plan dimensions are real — `mmPerUnit` is recovered from the
+plot scale and the floor is 90.66 × 68.44 m — but every height on screen is a
+plausible office number rather than a measured one.
+
+Two of them are load-bearing rather than decorative. **Partition height decides
+what you can see over**, which is the entire reason the shell is split into
+three classes; set it to 2.7 m and the open-plan wings become a warren. And
+**wall extrusion width is not wall thickness**: CAD draws both faces of a wall
+as separate lines, so each face is extruded and the pair together makes the wall
+read at the right width. Extruding each at a nominal 150 mm stacked them into
+something twice the width of the line underneath, which is exactly what the
+first render showed.
+
+**What we need from CBVA:** a section or a ceiling height, and confirmation that
+the desk-height partitions really are desk height. Three numbers change and
+nothing else does. This is 🟡 because being wrong here looks slightly off rather
+than producing a wrong booking or a wrong occupancy figure. Precedent: A15.
+
+---
+
+### A24 — 🟠 Eleven interpolated desks sit closer together than a desk is wide
+
+**Assumed:** the eleven anchors Phase 2 could not detect — `C1-06`, `C3-08`,
+`C3-09`, `C6-08`, `C6-09`, `C7-04`, `PA-16`, `D1-08`, `D1-09`, `D7-04`, `D8-04`
+— are in roughly the right place.
+
+**Affects:** `src/data/floorplan/seats.json`, produced by `interpolate()` in
+`tools/cad/build_floorplan.py`; visible in
+`src/components/floor-plan/three/seats.tsx`.
+
+**Why it matters:** they are not. The 3D view found this, which is a fair
+illustration of why building it was worth doing. Interpolated desks are spaced
+by dividing up the bay rather than by the drawing's measured 1.62 m workstation
+pitch, so fifteen pairs sit closer than the 1.30 m a desk is wide. The worst is
+**C7-04, 6 cm from PA-15** — effectively the same desk drawn twice.
+
+On the 2D plan, two anchors 6 cm apart on a 90-metre floor are the same pixel at
+fit-to-floor zoom, so this has been on screen since Phase 2 and was invisible.
+Two solid desks 6 cm apart are not.
+
+**What it does and does not affect.** Nothing about booking: all 141 desks
+exist, are individually bookable, and every constraint holds — this is where a
+desk is *drawn*, not whether it is real. The count of 141 is confirmed three
+independent ways and is not in question. What it affects is whether somebody can
+find their desk from the plan, which for eleven of them today they cannot.
+
+**How it gets fixed.** `/admin/floor-plan` exists for exactly this (ADR-017):
+drag the eleven, and the export writes them back to `seats.json` marked
+`manual`, surviving `npm run db:reset` and arriving in a reviewable diff. That is
+fifteen minutes with somebody from CBVA who knows the floor, and it is a better
+answer than a cleverer interpolator, because the drawing genuinely does not say
+where these eleven chairs are.
+
+Deliberately **not** fixed by nudging the geometry in the renderer. A desk drawn
+somewhere it is not is a data problem, and hiding it in one view would leave the
+2D plan, the list view and Phase 5's analytics still wrong.

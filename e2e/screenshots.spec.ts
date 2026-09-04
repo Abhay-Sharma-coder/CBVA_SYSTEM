@@ -78,3 +78,72 @@ test("shot floor list view", async ({ page }) => {
   await page.getByRole("table").waitFor();
   await page.screenshot({ path: "screenshots/floor-list-1440.png", fullPage: true });
 });
+
+/**
+ * The 3D view, for review.
+ *
+ * These run against SwiftShader in headless Chromium, which is a software
+ * rasteriser: a frame that takes a GPU 5 ms takes it several seconds. The
+ * screenshots are therefore given a long timeout and the device pixel ratio is
+ * pinned to 1 — they are for looking at, not for timing.
+ *
+ * The one that matters is `floor-3d-topdown`. Held against
+ * `public/floorplan/plan-texture-2048.webp` it answers the only question that
+ * decides whether the geometry is right: do the cruciform's arms and the wing
+ * positions land on the architect's own drawing.
+ */
+async function open3d(page: Page, width = 1280, height = 820) {
+  await page.setViewportSize({ width, height });
+  await page.goto("/floor");
+  await settle(page, "/floor");
+  await page.getByRole("radio", { name: "3D view" }).click({ noWaitAfter: true });
+  await page.waitForSelector('[data-floor-3d="ready"]', { timeout: 120_000 });
+  await page.waitForFunction(() => (window.__cbva3d?.frames ?? 0) > 6, undefined, {
+    timeout: 120_000,
+  });
+}
+
+const SHOT = { timeout: 180_000 } as const;
+
+/**
+ * The 3D shots are PAGE screenshots, not element screenshots.
+ *
+ * Targeting `[data-floor-3d="ready"]` failed intermittently with "element is
+ * not attached to the DOM", and the cause is not a flake worth retrying around:
+ * under SwiftShader a long-running scene can genuinely lose its WebGL context,
+ * at which point the view does what it is supposed to do and swaps itself for
+ * the 2D plan with a notice. The element really is gone. A page screenshot
+ * captures whichever of the two is showing, and shows the surrounding controls,
+ * which is what these are reviewed for anyway.
+ */
+
+// Software rasterisation, as in floor-plan-3d.spec.ts. The suite default of
+// sixty seconds is not enough to reach a settled frame, let alone capture one.
+test.describe.configure({ timeout: 300_000 });
+
+test("shot floor 3d default", async ({ page }) => {
+  await open3d(page);
+  await page.screenshot({ ...SHOT, path: "screenshots/floor-3d-default.png" });
+});
+
+test("shot floor 3d top down", async ({ page }) => {
+  await open3d(page);
+  await page.getByRole("button", { name: "Top down" }).click({ noWaitAfter: true });
+  await page.waitForTimeout(3000);
+  await page.screenshot({ ...SHOT, path: "screenshots/floor-3d-topdown.png" });
+});
+
+test("shot floor 3d zone and selection", async ({ page }) => {
+  await open3d(page);
+  await page.getByRole("radio", { name: "Zone C" }).click({ noWaitAfter: true });
+  await page.waitForTimeout(4000);
+  await page.screenshot({ ...SHOT, path: "screenshots/floor-3d-zone-c.png" });
+});
+
+test("shot floor 3d on a phone", async ({ page }) => {
+  await open3d(page, 390, 844);
+  await page.locator('[data-floor-3d="ready"]').screenshot({
+    ...SHOT,
+    path: "screenshots/floor-3d-390.png",
+  });
+});

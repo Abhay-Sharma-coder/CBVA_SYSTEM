@@ -4,6 +4,7 @@ import { useReducedMotion } from "motion/react";
 
 import { ListView } from "@/components/floor-plan/list-view";
 import { PlanCanvas } from "@/components/floor-plan/plan-canvas";
+import { ThreeView } from "@/components/floor-plan/three-view";
 import type {
   FloorPlanMode,
   FloorPlanSeat,
@@ -14,14 +15,16 @@ import type { ZoneCode } from "@/lib/floorplan";
 export interface FloorPlanProps {
   seats: FloorPlanSeat[];
   /**
-   * Phase 4 adds "3d" over this same seat array and the same store. Seat
-   * position is data; 2D versus 3D is a rendering choice, so nothing above
-   * this component may know which one is showing.
+   * "3d" renders this same seat array through the same store. Seat position is
+   * data; 2D versus 3D is a rendering choice, so nothing above this component
+   * may know which one is showing.
    */
   mode: FloorPlanMode;
   view?: FloorPlanView;
   activeZone?: ZoneCode | null;
   focusedSeatCode?: string | null;
+  /** The seat whose dialog is open. Shared with 2D; drawn as the gold ring. */
+  selectedSeatCode?: string | null;
   crossfadeKey?: string;
   onFocusSeat?: (code: string | null) => void;
   onActivateSeat?: (seat: FloorPlanSeat) => void;
@@ -36,6 +39,7 @@ export function FloorPlan({
   view = "plan",
   activeZone = null,
   focusedSeatCode = null,
+  selectedSeatCode = null,
   crossfadeKey = "",
   onFocusSeat,
   onActivateSeat,
@@ -54,13 +58,24 @@ export function FloorPlan({
   }
 
   if (mode === "3d") {
-    // Phase 4. Deliberately not a stub component with its own seat handling —
-    // when it lands it renders this same array through the same store.
+    // The SAME seat array, the SAME store, the same activate callback that
+    // opens the same dialog. 2D and 3D differ only in how a seat is drawn.
+    //
+    // `onDragSeat` is deliberately not forwarded: moving a desk is a plan-space
+    // edit the admin editor performs against the drawing, and doing it by
+    // dragging a box across a perspective projection would be a worse tool, not
+    // a better one. The editor stays 2D.
     return (
-      <div
+      <ThreeView
+        seats={seats}
+        activeZone={activeZone}
+        focusedSeatCode={focusedSeatCode}
+        selectedSeatCode={selectedSeatCode}
+        reduceMotion={reduceMotion}
+        crossfadeKey={crossfadeKey}
+        onFocusSeat={onFocusSeat ?? noop}
+        onActivateSeat={onActivateSeat ?? noop}
         className={className}
-        role="note"
-        aria-label="The 3D view arrives in Phase 4"
       />
     );
   }

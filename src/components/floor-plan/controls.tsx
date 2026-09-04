@@ -1,13 +1,14 @@
 "use client";
 
 import { motion } from "motion/react";
-import { List, Map as MapIcon, Maximize2, Minus, Plus } from "lucide-react";
+import { Box, List, Map as MapIcon, Maximize2, Minus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/primitives";
 import { SEAT_STATUSES, SEAT_STATUS_TOKENS } from "@/components/seat/seat-status";
 import type {
   BookableDay,
+  FloorPlanMode,
   FloorPlanView,
   SlotDefinition,
   SlotKey,
@@ -199,6 +200,50 @@ export function ViewToggle({
           className={cn(
             "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-xs transition-colors",
             view === value
+              ? "border-navy bg-navy text-paper"
+              : "border-hairline bg-surface text-ink-muted hover:bg-surface-sunken",
+          )}
+        >
+          <Icon className="size-3.5" aria-hidden="true" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 2D or 3D, sitting beside the plan/list toggle rather than hidden in the
+ * canvas, because the way back out of 3D has to be as visible as the way in.
+ *
+ * It disappears in list view: "3D list" is not a thing, and offering a control
+ * that silently does nothing is worse than not offering it.
+ */
+export function ModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: FloorPlanMode;
+  onChange: (m: FloorPlanMode) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Floor plan rendering" className="flex items-center gap-1">
+      {(
+        [
+          ["2d", "Plan view", MapIcon],
+          ["3d", "3D view", Box],
+        ] as const
+      ).map(([value, label, Icon]) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          data-mode={value}
+          aria-checked={mode === value}
+          onClick={() => onChange(value)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-xs transition-colors",
+            mode === value
               ? "border-navy bg-navy text-paper"
               : "border-hairline bg-surface text-ink-muted hover:bg-surface-sunken",
           )}

@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { useReducedMotion } from "motion/react";
+
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 import { FloorPlan } from "@/components/floor-plan/floor-plan";
 import {
   DateStrip,
   Legend,
+  ModeToggle,
   OccupancyCount,
   SlotToggle,
   ViewToggle,
@@ -53,6 +55,10 @@ export function FloorClient() {
     setFocusedSeatCode,
     view,
     setView,
+    mode,
+    setMode,
+    selectedSeatCode,
+    setSelectedSeatCode,
   } = useUiStore();
 
   const [intent, setIntent] = useState<FloorPlanSeat | null>(null);
@@ -73,11 +79,13 @@ export function FloorClient() {
     const slot = params.get("slot");
     const zone = params.get("zone");
     const v = params.get("view");
+    const m = params.get("mode");
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setActiveDate(date);
     if (slot === "AM" || slot === "PM") setActiveSlot(slot);
     if (zone === "A" || zone === "B" || zone === "C" || zone === "D") setActiveZone(zone);
     if (v === "list" || v === "plan") setView(v);
-  }, [params, setActiveDate, setActiveSlot, setActiveZone, setView]);
+    if (m === "2d" || m === "3d") setMode(m);
+  }, [params, setActiveDate, setActiveSlot, setActiveZone, setView, setMode]);
 
   /**
    * Writing the state back to the URL, WITHOUT the router.
@@ -100,13 +108,16 @@ export function FloorClient() {
     next.set("slot", activeSlot);
     if (activeZone) next.set("zone", activeZone);
     if (view !== "plan") next.set("view", view);
+    // "Look at Zone C in 3D" has to be a link too, so mode rides the URL with
+    // everything else. Omitted at the default, to keep the common link short.
+    if (mode !== "2d") next.set("mode", mode);
     const query = next.toString();
     if (query !== params.toString()) {
       // replaceState, not pushState: changing slot should not stack up history
       // entries somebody then has to press Back through.
       window.history.replaceState(null, "", `${pathname}?${query}`);
     }
-  }, [activeDate, activeSlot, activeZone, view, params, pathname]);
+  }, [activeDate, activeSlot, activeZone, view, mode, params, pathname]);
 
   const dates = useQuery({
     queryKey: ["floor", "dates"],
@@ -148,9 +159,24 @@ export function FloorClient() {
     [seats, activeZone],
   );
 
-  const onActivateSeat = useCallback((seat: FloorPlanSeat) => {
-    setIntent(seat);
-  }, []);
+  /**
+   * One activate path for both renderings. A seat clicked in 3D and a seat
+   * clicked on the plan arrive here identically, which is what makes the
+   * selection genuinely shared rather than mirrored: switch to 2D after
+   * picking a desk in 3D and the same desk is still the selected one.
+   */
+  const onActivateSeat = useCallback(
+    (seat: FloorPlanSeat) => {
+      setIntent(seat);
+      setSelectedSeatCode(seat.seatCode);
+    },
+    [setSelectedSeatCode],
+  );
+
+  const onCloseDialog = useCallback(() => {
+    setIntent(null);
+    setSelectedSeatCode(null);
+  }, [setSelectedSeatCode]);
 
   /**
    * The dialog needs three things the plan does not carry: whether this person
@@ -193,7 +219,10 @@ export function FloorClient() {
             <div className="h-8 w-32 rounded-sm bg-surface-sunken" />
           )}
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <div className="flex flex-wrap items-center gap-2">
+          {view === "plan" ? <ModeToggle mode={mode} onChange={setMode} /> : null}
+          <ViewToggle view={view} onChange={setView} />
+        </div>
       </div>
 
       <Card>
@@ -232,17 +261,32 @@ export function FloorClient() {
           aria-label="Loading the floor plan"
         />
       ) : (
-        <FloorPlan
-          seats={visible}
-          mode="2d"
-          view={view}
-          activeZone={activeZone}
-          focusedSeatCode={focusedSeatCode}
-          crossfadeKey={`${activeDate}-${activeSlot}`}
-          onFocusSeat={setFocusedSeatCode}
-          onActivateSeat={onActivateSeat}
-          className={view === "plan" ? "h-[clamp(26rem,70vh,50rem)] w-full" : undefined}
-        />
+        /* The swap between renderings is a crossfade, not a cut: both show the
+           same floor at the same framing, so a hard replace reads as the page
+           breaking rather than as one object turning. 160ms is enough to say
+           "the same thing, seen differently" without making the toggle drag. */
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={view === "list" ? "list" : mode}
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.16 }}
+          >
+            <FloorPlan
+              seats={visible}
+              mode={mode}
+              view={view}
+              activeZone={activeZone}
+              focusedSeatCode={focusedSeatCode}
+              selectedSeatCode={selectedSeatCode}
+              crossfadeKey={`${activeDate}-${activeSlot}`}
+              onFocusSeat={setFocusedSeatCode}
+              onActivateSeat={onActivateSeat}
+              className={view === "plan" ? "h-[clamp(26rem,70vh,50rem)] w-full" : undefined}
+            />
+          </motion.div>
+        </AnimatePresence>
       )}
 
       <BookingDialog
@@ -253,7 +297,7 @@ export function FloorClient() {
         canBookOnBehalf={mine.data?.canBookOnBehalf ?? false}
         now={clock.data?.now ?? null}
         cutoffMinutes={dates.data?.cutoffMinutes ?? 60}
-        onClose={() => setIntent(null)}
+        onClose={onCloseDialog}
       />
     </div>
   );

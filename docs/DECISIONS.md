@@ -614,3 +614,103 @@ resolve `fs` — taking the whole dev server down with it. The Node-only work
 therefore lives in a separate module imported inside the
 `NEXT_RUNTIME === "nodejs"` guard, which is the only shape Next tree-shakes
 reliably. `next.config.ts` also marks `pg` as a server-external package.
+
+---
+
+## ADR-030 — The 3D shell is merged segment boxes, not extruded shapes
+
+**Decision.** `walls.json` becomes three merged meshes — wall, partition,
+glazing — by turning every SEGMENT of every chain into one oriented box and
+merging with `mergeGeometries`. Not `THREE.Shape` into `ExtrudeGeometry`.
+
+**Why.** `ExtrudeGeometry` needs a *simple closed* shape, and earcut silently
+produces holes, inverted faces or NaN vertices when the outline self-touches or
+does not close. 437 of the 534 chains in `walls.json` are open polylines, and
+several closed ones touch themselves where corridors meet. CAD linework chained
+end to end has no obligation to be a simple polygon, and this drawing's is not.
+Extruding shapes would have reintroduced, one layer further in, exactly the
+class of failure the whole Phase 2 simplification exists to avoid.
+
+A segment box cannot fail to triangulate. A chain that doubles back merely
+overlaps itself. After merging it is still **one draw call per class**, which is
+the only thing the shape approach was buying.
+
+**Cost.** 1,431 segments and ~34k triangles rather than a few thousand, and
+corners are mitred by overrunning each box by one wall thickness rather than by
+being genuinely joined. At this camera distance neither is visible.
+
+**Two things measuring it turned up.**
+
+The **longest polygon in generator 2's `walls.json` was not a wall.** It was a
+61-point, 971-unit run of 45-degree zig-zag inside a 35-unit box in zone A — a
+hatch fill that survived the length filter. Invisible flat; a thicket extruded.
+The two populations separate cleanly on how often a chain doubles back: that one
+reverses direction at 100% of its vertices, the five longest real walls at
+0–40%. `is_hatch()` drops chains reversing at 80% or more over six points or
+more, and a unit test holds the committed file to it.
+
+The **400-polygon budget predated glazing.** `G-GLASS` and `W-WINDOW` were
+excluded from `walls.json` entirely, which is defensible when glazing is one
+more line on a flat drawing and wrong when the difference between a room and a
+box is whether you can see through it. Chained per class the shell is 97 wall,
+157 partition and 280 glazing; squeezing that into 400 threw away 45% of the
+curtain wall's length. The ceiling moved to 600, with per-class budgets so one
+noisy class can no longer silently truncate another.
+
+---
+
+## ADR-031 — The 3D bundle is lazy, and `mode` is shared state
+
+**Decision.** Everything that imports `three` lives under
+`src/components/floor-plan/three/`, reached only through
+`next/dynamic(..., { ssr: false })` in `three-view.tsx`. `mode` is a field on the
+Zustand store and a query parameter, exactly like `date`, `slot`, `zone` and
+`view`.
+
+**Why lazy.** three, drei and the scene are 855 KB raw, 224 KB gzipped. Most
+people who open `/floor` never press the 3D toggle, and `/floor`'s First Load JS
+went from 232 kB to 238 kB — the toggle and the store field, not the renderer.
+The rule that keeps this true is structural rather than a convention: nothing
+above `three/` may import from it, and a stray `import type` is enough to break
+it, so the boundary is one directory and one dynamic import.
+
+**Why `mode` is in the store rather than local state.** The architecture rule
+since Phase 2 is that 2D and 3D render the same seat array through the same
+store. If `mode` were local to the floor screen, the *selection* would have to
+be mirrored between two renderings, and mirrored state drifts. Instead
+`selectedSeatCode` — declared in Phase 2 and unused ever since — is now the one
+value both write, so "pick a desk in 3D, switch to 2D, the same desk is
+selected" is true by construction rather than by synchronisation.
+`e2e/floor-plan-3d.spec.ts` asserts it anyway.
+
+**Cost.** A `mode=3d` link asks the recipient's browser for 224 KB before it can
+show anything, and there is a visible beat while it arrives. The alternative —
+three on the critical path for everybody — is worse.
+
+---
+
+## ADR-032 — 3D is not the accessible path, and says so
+
+**Decision.** The 3D canvas is `role="img"` with a summary label, not
+`role="application"`. It has no keyboard seat navigation. The `ModeToggle` sits
+beside the plan/list toggle rather than inside the canvas, and the list view
+stays one click away at all times.
+
+**Why.** Phase 2 made every seat a real `<button>` with geometric arrow
+adjacency, roving tabindex and an accessible name (ADR-018). None of that is
+reproducible in a WebGL canvas without inventing a parallel focus model that
+would be worse than the one already sitting behind the toggle. Claiming
+`role="application"` would announce an interactive widget and then fail to
+behave like one, which is worse than announcing a picture.
+
+So 3D is additive: a wayfinding and demonstration view, with two fully operable
+renderings of the same data permanently adjacent. The toggle is a labelled
+radiogroup, and it never disappears.
+
+**The fallback ladder, for the same reason.** No WebGL, a lost context, or any
+throw inside the scene all land on the 2D plan with one quiet line of
+explanation, via `detectWebgl()`, a `webglcontextlost` listener and a local
+error boundary. There is deliberately no `error.tsx` anywhere in this app; a
+route-level error page would replace the whole floor screen when all that has
+failed is one optional rendering of it. A blank black rectangle in front of a
+partner is worse than never having offered 3D at all.
