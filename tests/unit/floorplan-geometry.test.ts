@@ -230,3 +230,81 @@ describe("editor helpers", () => {
     );
   });
 });
+
+/* ------------------------------------------------------- A24: desk overlaps */
+
+describe("no two desks occupy the same space (ASSUMPTIONS A24)", () => {
+  // mmPerUnit may legitimately be null when the plot scale cannot be
+  // recovered; the committed drawing has it, and a test that silently passes
+  // on null would be testing nothing.
+  const MM_PER_UNIT = floorplanMeta.mmPerUnit ?? 0;
+  /** A desk is 1.30 m wide. Two anchors closer than that are the same desk. */
+  const MIN_UNITS = 1300 / MM_PER_UNIT;
+  const metres = (u: number) => (u * MM_PER_UNIT) / 1000;
+
+  const pairs = (() => {
+    const seats = floorplanSeatAnchors.seats;
+    const out: Array<{ a: string; b: string; m: number }> = [];
+    for (let i = 0; i < seats.length; i++) {
+      for (let k = i + 1; k < seats.length; k++) {
+        const d = Math.hypot(
+          seats[i]!.planX - seats[k]!.planX,
+          seats[i]!.planY - seats[k]!.planY,
+        );
+        if (d < MIN_UNITS) {
+          out.push({ a: seats[i]!.seatCode, b: seats[k]!.seatCode, m: metres(d) });
+        }
+      }
+    }
+    return out.sort((x, y) => x.m - y.m);
+  })();
+
+  /**
+   * The regression test for A24.
+   *
+   * Fifteen pairs overlapped before Phase 5 — the worst being C7-04 six
+   * centimetres from PA-15, which is one desk drawn twice. Two anchors that
+   * close are a single pixel at fit-to-floor zoom, which is why this survived
+   * two phases on the 2D plan and was only obvious once the desks became solid
+   * objects in the 3D view.
+   *
+   * It matters beyond looks: two desks at one pixel means a click resolves
+   * ambiguously, and the person clicking is a partner seeing this for the first
+   * time.
+   */
+  it("knows the drawing scale, so the distance check means something", () => {
+    expect(MM_PER_UNIT).toBeGreaterThan(0);
+  });
+
+  it("has no pair of desks closer than a desk is wide", () => {
+    expect(
+      pairs.map((p) => `${p.a}↔${p.b} ${p.m.toFixed(2)}m`),
+    ).toEqual([]);
+  });
+
+  it("still has all 141 desks after the re-placement", () => {
+    expect(floorplanSeatAnchors.seats).toHaveLength(141);
+    expect(new Set(floorplanSeatAnchors.seats.map((s) => s.seatCode)).size).toBe(141);
+  });
+
+  /**
+   * The eleven stay flagged `interpolated`, deliberately.
+   *
+   * Re-placing them at the drawing's own pitch stops them overlapping; it does
+   * not make them correct. The drawing genuinely does not say where these
+   * chairs are, so calling them `manual` would claim a confidence nobody has
+   * and would quietly close an open question. A24 stays open.
+   */
+  it("keeps the re-placed desks marked as inferred, not as human corrections", () => {
+    const interpolated = floorplanSeatAnchors.seats
+      .filter((s) => s.source === "interpolated")
+      .map((s) => s.seatCode)
+      .sort();
+    expect(interpolated).toEqual(
+      [
+        "C1-06", "C3-08", "C3-09", "C6-08", "C6-09", "C7-04",
+        "D1-08", "D1-09", "D7-04", "D8-04", "PA-16",
+      ].sort(),
+    );
+  });
+});

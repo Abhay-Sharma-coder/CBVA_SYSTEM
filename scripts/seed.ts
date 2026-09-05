@@ -66,6 +66,18 @@ const DAY_ATTENDANCE: Record<number, number> = {
 
 const NO_SHOW_RATE = 0.12;
 const CANCEL_RATE = 0.08;
+/**
+ * Arrived and then handed the rest of the slot back, and cancelled by an
+ * administrator.
+ *
+ * Both are new in Phase 5 and both are small on purpose. They exist because
+ * ADR-024 requires the five terminal statuses to stay separate in the
+ * analytics legend, and with no rows at all the report rendered two
+ * permanently empty categories — which reads as a broken screen rather than as
+ * a distinction worth making.
+ */
+const LEFT_EARLY_RATE = 0.03;
+const ADMIN_CANCEL_RATE = 0.015;
 const ON_BEHALF_RATE = 0.04;
 const BAY_AFFINITY = 0.65;
 const FULL_DAY_RATE = 0.7;
@@ -421,6 +433,8 @@ async function main() {
   }
 
   let fixedPairs = 0;
+  /** seatCode -> the person allocated it. Reused by the seeded releases below. */
+  const ownerBySeatCode = new Map<string, SeededUser>();
   for (const alloc of FIXED_SEAT_ALLOCATION) {
     const pool = byGrade.get(alloc.grade) ?? [];
     if (pool.length !== alloc.codes.length) {
@@ -440,6 +454,7 @@ async function main() {
         .update(schema.users)
         .set({ fixedSeatId: seatId })
         .where(sql`${schema.users.id} = ${user.id}`);
+      ownerBySeatCode.set(code, user);
       fixedPairs++;
     }
   }
@@ -555,6 +570,13 @@ async function main() {
       const roll = rng.next();
       const cancelled = roll < CANCEL_RATE;
       const noShow = !cancelled && roll < CANCEL_RATE + NO_SHOW_RATE;
+      const leftEarly =
+        !cancelled && !noShow && roll < CANCEL_RATE + NO_SHOW_RATE + LEFT_EARLY_RATE;
+      const adminCancelled =
+        !cancelled &&
+        !noShow &&
+        !leftEarly &&
+        roll < CANCEL_RATE + NO_SHOW_RATE + LEFT_EARLY_RATE + ADMIN_CANCEL_RATE;
       const onBehalf = rng.chance(ON_BEHALF_RATE);
       const bookedBy = onBehalf ? rng.pick(bookableUsers) : user;
 
@@ -566,6 +588,23 @@ async function main() {
         let checkedInAt: Date | null = null;
         let releasedAt: Date | null = null;
         let cancelledAt: Date | null = null;
+        let checkInMethod: string | null = null;
+
+        /**
+         * How the check-in arrived, when there was one.
+         *
+         * NULL on every row until Phase 5, which made A19's whole argument
+         * unqueryable: a desk QR proves somebody used THAT desk, a door badge
+         * only proves they reached the floor, and the analytics has to keep the
+         * two apart. With no data behind it the distinction was a column
+         * comment. The mix is a guess — most people scan the sticker in front
+         * of them, a minority are picked up by the door reader, a few use the
+         * app — and it is an assumption rather than a measurement.
+         */
+        const pickMethod = () => {
+          const m = rng.next();
+          return m < 0.62 ? "qr" : m < 0.88 ? "badge" : "app";
+        };
 
         if (cancelled) {
           status = "cancelled_by_user";
@@ -575,9 +614,28 @@ async function main() {
           // to completed_no_show once the slot is over.
           releasedAt = new Date(startsAt.getTime() + 120 * 60_000);
           status = isPast ? "completed_no_show" : "auto_released";
+        } else if (leftEarly && isPast) {
+          /**
+           * Arrived, then gave the rest of the slot back.
+           *
+           * Seeded because ADR-024 requires this status to stay separate from a
+           * plain no-show in the legend, and with zero rows the analytics
+           * screen rendered a permanently empty category — which reads as a
+           * broken report rather than a real distinction.
+           */
+          status = "cancelled_after_check_in";
+          checkedInAt = new Date(startsAt.getTime() + rng.int(-10, 20) * 60_000);
+          checkInMethod = pickMethod();
+          cancelledAt = new Date(startsAt.getTime() + rng.int(90, 200) * 60_000);
+        } else if (adminCancelled && isPast) {
+          // The firm took the desk back — a desk out of service, a room
+          // reshuffle. Never counted against the person.
+          status = "cancelled_by_admin";
+          cancelledAt = new Date(startsAt.getTime() - rng.int(1, 12) * 3600_000);
         } else if (isPast) {
           status = "completed";
           checkedInAt = new Date(startsAt.getTime() + rng.int(-15, 45) * 60_000);
+          checkInMethod = pickMethod();
         } else if (isFuture) {
           status = "confirmed";
         } else {
@@ -586,6 +644,7 @@ async function main() {
           status = arrived ? "checked_in" : "confirmed";
           if (arrived) {
             checkedInAt = new Date(startsAt.getTime() + rng.int(-15, 45) * 60_000);
+            checkInMethod = pickMethod();
           }
         }
 
@@ -601,6 +660,7 @@ async function main() {
           status,
           source: onBehalf ? "on_behalf" : "self",
           checkedInAt,
+          checkInMethod,
           releasedAt,
           cancelledAt,
           createdAt: new Date(startsAt.getTime() - rng.int(12, 200) * 3600_000),
@@ -622,6 +682,7 @@ async function main() {
           bookedByUserId: sql`excluded.booked_by_user_id`,
           source: sql`excluded.source`,
           checkedInAt: sql`excluded.checked_in_at`,
+          checkInMethod: sql`excluded.check_in_method`,
           releasedAt: sql`excluded.released_at`,
           cancelledAt: sql`excluded.cancelled_at`,
           updatedAt: sql`excluded.updated_at`,
@@ -696,6 +757,94 @@ async function main() {
         },
       });
   });
+
+  /* ---- released fixed desks, and one recurring booking ----
+   *
+   * Both are Phase 5 features and both would otherwise demo as an empty screen
+   * with a "nothing here yet" message, which is the worst way to show somebody
+   * a feature that exists.
+   *
+   * The releases matter for a second reason: a released allocated desk is the
+   * ONLY way the 47 fixed desks ever enter the occupancy data, so without a few
+   * of them the capacity figure never moves and the feature's whole argument is
+   * invisible in the analytics.
+   */
+  const forwardDates = dates.filter((d) => d >= iso(t0));
+  const releaseRows: (typeof schema.seatReleases.$inferInsert)[] = [];
+
+  const fixedPairsForRelease = FIXED_SEAT_ALLOCATION.flatMap((group) =>
+    group.codes.map((code) => ({ code })),
+  ).filter((p) => ownerBySeatCode.has(p.code));
+
+  for (let i = 0; i < Math.min(6, fixedPairsForRelease.length); i++) {
+    // Deterministic pick: every seeded run releases the same desks.
+    const pair = fixedPairsForRelease[(i * 7 + 3) % fixedPairsForRelease.length]!;
+    const owner = ownerBySeatCode.get(pair.code);
+    const date = forwardDates[i % Math.max(1, forwardDates.length)];
+    if (!owner || !date) continue;
+    const seatId = id("seat", pair.code);
+
+    for (const slot of DEFAULT_SLOT_DEFINITIONS.map((d) => d.key)) {
+      const { startsAt, endsAt } = slotBounds(date, slot);
+      releaseRows.push({
+        id: id("release", pair.code, date, slot),
+        seatId,
+        releaseDate: date,
+        slot,
+        startsAt,
+        endsAt,
+        ownerUserId: owner.id,
+        releasedByUserId: owner.id,
+        note: "Working from home.",
+        createdAt: new Date(startsAt.getTime() - 48 * 3600_000),
+        updatedAt: new Date(startsAt.getTime() - 48 * 3600_000),
+      });
+    }
+  }
+
+  if (releaseRows.length > 0) {
+    await db
+      .insert(schema.seatReleases)
+      .values(releaseRows)
+      .onConflictDoUpdate({
+        target: schema.seatReleases.id,
+        set: {
+          startsAt: sql`excluded.starts_at`,
+          endsAt: sql`excluded.ends_at`,
+          revokedAt: sql`null`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+  }
+
+  /* one recurring booking, so /bookings has something to show for the feature */
+  const seriesUser = bookableUsers[3];
+  const seriesSeat = [...bookableSeats].find((s) => s.bay === "C5");
+  let seriesCount = 0;
+  if (seriesUser && seriesSeat && forwardDates.length > 0) {
+    await db
+      .insert(schema.bookingSeries)
+      .values({
+        id: id("series", seriesUser.email, seriesSeat.seatCode),
+        occupantUserId: seriesUser.id,
+        createdByUserId: seriesUser.id,
+        seatId: seriesSeat.id,
+        slot: DEFAULT_SLOT_DEFINITIONS[0]!.key,
+        // Tuesday, Wednesday, Thursday — the three days the seeded attendance
+        // curve says are busy, so the series is competing for a real desk.
+        weekdays: [2, 3, 4],
+        startsOn: forwardDates[0]!,
+        endsOn: null,
+        status: "active",
+        createdAt: new Date(t0.getTime() - 7 * 86_400_000),
+        updatedAt: new Date(t0.getTime() - 7 * 86_400_000),
+      })
+      .onConflictDoUpdate({
+        target: schema.bookingSeries.id,
+        set: { status: sql`'active'`, startsOn: sql`excluded.starts_on` },
+      });
+    seriesCount = 1;
+  }
 
   /* ---- report ---- */
   const counts = await db.execute(sql`
