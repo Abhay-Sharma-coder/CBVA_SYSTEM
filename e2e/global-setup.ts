@@ -37,6 +37,33 @@ const ROUTES = [
   "/api/floor/dates",
   "/api/bookings",
   "/api/rooms",
+
+  /* ---------------------------------------------- Phase 5 additions ----
+   *
+   * Not optional. `next dev` compiles a route on its first request, and the
+   * admin screens are the heaviest in the product — /admin/seats took 47
+   * seconds and /admin and /admin/users blew a 60-second test timeout outright
+   * on the first cold run. Three specs failed with `page.goto` timeouts that
+   * looked like accessibility failures and were webpack.
+   */
+  "/who",
+  "/me",
+  "/admin/analytics",
+  "/admin/analytics/today",
+  "/admin/analytics/forecast",
+  "/admin/seats",
+  "/admin/users",
+  "/admin/settings",
+  "/admin/audit",
+  "/admin/jobs",
+  "/api/admin/analytics?view=trends",
+  "/api/admin/seats",
+  "/api/admin/users",
+  "/api/admin/settings",
+  "/api/admin/audit",
+  "/api/admin/jobs",
+  "/api/series",
+  "/api/me",
 ];
 
 export default async function globalSetup(): Promise<void> {

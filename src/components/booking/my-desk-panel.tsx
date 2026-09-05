@@ -80,6 +80,7 @@ export function MyDeskPanel({ fixedSeatCode }: { fixedSeatCode: string | null })
     text: string;
   } | null>(null);
   const [releaseDate, setReleaseDate] = React.useState("");
+  const [confirmingSeries, setConfirmingSeries] = React.useState<SeriesRow | null>(null);
 
   const mine = useQuery({
     queryKey: ["series", "mine"],
@@ -157,6 +158,37 @@ export function MyDeskPanel({ fixedSeatCode }: { fixedSeatCode: string | null })
   return (
     <div className="space-y-6">
       {notice ? <StatusMessage tone={notice.tone}>{notice.text}</StatusMessage> : null}
+
+      {confirmingSeries ? (
+        <StatusMessage tone="caution">
+          <span className="block">
+            This cancels the{" "}
+            <strong className="font-medium">
+              {confirmingSeries.upcoming.length} desk
+              {confirmingSeries.upcoming.length === 1 ? "" : "s"}
+            </strong>{" "}
+            you already have booked on {confirmingSeries.seatCode}, and gives
+            them back to the floor. Somebody else may take them straight away.
+          </span>
+          <span className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={endSeries.isPending}
+              onClick={() => {
+                endSeries.mutate({ id: confirmingSeries.id, cancelFuture: true });
+                setConfirmingSeries(null);
+              }}
+            >
+              Yes, give back {confirmingSeries.upcoming.length} desk
+              {confirmingSeries.upcoming.length === 1 ? "" : "s"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmingSeries(null)}>
+              Keep them
+            </Button>
+          </span>
+        </StatusMessage>
+      ) : null}
 
       {isFixed && fixedSeatCode ? (
         <Card>
@@ -306,11 +338,18 @@ export function MyDeskPanel({ fixedSeatCode }: { fixedSeatCode: string | null })
                         >
                           Stop repeating
                         </Button>
+                        {/*
+                          Confirmed, because it is the one irreversible thing on
+                          this panel: it cancels every desk already booked ahead,
+                          and a desk given back may be taken within minutes.
+                          "Stop repeating" beside it does not need one — it
+                          leaves the desks alone.
+                        */}
                         <Button
                           size="sm"
                           variant="ghost"
                           disabled={endSeries.isPending}
-                          onClick={() => endSeries.mutate({ id: s.id, cancelFuture: true })}
+                          onClick={() => setConfirmingSeries(s)}
                         >
                           Stop and give the desks back
                         </Button>

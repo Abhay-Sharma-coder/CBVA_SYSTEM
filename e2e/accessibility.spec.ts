@@ -193,8 +193,9 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
     "people",
     "/admin/users",
     async (page) => {
+      // The page h1 is also "People", so pin the card title by level.
       await page
-        .getByRole("heading", { level: 3, name: "People" })
+        .getByRole("heading", { level: 2, name: "People" })
         .waitFor({ timeout: 60_000 });
     },
   ],
@@ -209,7 +210,10 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
     "audit log",
     "/admin/audit",
     async (page) => {
-      await page.getByRole("heading", { name: /Audit log/ }).waitFor({ timeout: 60_000 });
+      // level 1: the card title is also "Audit log", plus its entry count.
+      await page
+        .getByRole("heading", { level: 1, name: "Audit log" })
+        .waitFor({ timeout: 60_000 });
     },
   ],
   [
@@ -217,7 +221,7 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
     "/admin/jobs",
     async (page) => {
       await page
-        .getByRole("heading", { name: /What the next run would do/ })
+        .getByRole("heading", { level: 2, name: /What the next run would do/ })
         .waitFor({ timeout: 60_000 });
     },
   ],

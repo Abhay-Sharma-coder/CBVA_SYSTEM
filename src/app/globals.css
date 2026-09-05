@@ -233,6 +233,24 @@
   .hairline-b {
     box-shadow: var(--shadow-hairline);
   }
+
+  /*
+   * Long admin tables — the seat inventory and the staff roster are both 141
+   * rows, and the audit log pages at 50.
+   *
+   * `content-visibility: auto` lets the browser skip layout and paint for rows
+   * that are off screen, which is the cheap end of the virtualisation advice
+   * and costs nothing at the call site. Real windowing would mean a dependency
+   * and losing native table semantics — including the row/column relationships
+   * a screen reader uses — which is a poor trade for 141 rows.
+   *
+   * `contain-intrinsic-size` is the reserved height, so the scrollbar does not
+   * jump as rows are realised. 44px is the measured row height.
+   */
+  .rows-lazy > tbody > tr {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

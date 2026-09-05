@@ -168,7 +168,7 @@ export function UsersClient() {
               Clear the search or widen the grade filter.
             </EmptyState>
           ) : (
-            <Table>
+            <Table className="rows-lazy">
               <thead>
                 <tr>
                   <Th>Name</Th>

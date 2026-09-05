@@ -127,7 +127,7 @@ export function AuditClient() {
           </EmptyState>
         ) : (
           <>
-            <Table>
+            <Table className="rows-lazy">
               <thead>
                 <tr>
                   <Th>When</Th>

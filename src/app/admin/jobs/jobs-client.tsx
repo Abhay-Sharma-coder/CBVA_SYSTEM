@@ -53,6 +53,7 @@ export function JobsClient() {
   const qc = useQueryClient();
   const [result, setResult] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [confirmingBacklog, setConfirmingBacklog] = React.useState(false);
 
   const { data, isPending } = useQuery({
     queryKey: ["admin", "jobs"],
@@ -156,14 +157,35 @@ export function JobsClient() {
             >
               Run the jobs now
             </Button>
+            {/*
+              Confirmed, because settling a backlog REWRITES ATTENDANCE HISTORY
+              — the number this whole product exists to report. The horizon
+              holds those rows back precisely so a human decides, and a button
+              that does it in one click would defeat the point of the bound.
+            */}
             {p.beyondHorizon > 0 ? (
-              <Button
-                variant="danger"
-                disabled={run.isPending}
-                onClick={() => run.mutate({ settleBacklog: true, dryRun: false })}
-              >
-                Settle the {p.beyondHorizon} beyond the horizon
-              </Button>
+              confirmingBacklog ? (
+                <>
+                  <Button
+                    variant="danger"
+                    disabled={run.isPending}
+                    onClick={() => {
+                      run.mutate({ settleBacklog: true, dryRun: false });
+                      setConfirmingBacklog(false);
+                    }}
+                  >
+                    Yes, settle {p.beyondHorizon} booking
+                    {p.beyondHorizon === 1 ? "" : "s"} as no-shows
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirmingBacklog(false)}>
+                    Leave them
+                  </Button>
+                </>
+              ) : (
+                <Button variant="danger" onClick={() => setConfirmingBacklog(true)}>
+                  Settle the {p.beyondHorizon} beyond the horizon
+                </Button>
+              )
             ) : null}
           </div>
 

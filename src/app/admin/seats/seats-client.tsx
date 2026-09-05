@@ -213,7 +213,7 @@ export function SeatsClient() {
               Clear the search or widen the status filter.
             </EmptyState>
           ) : (
-            <Table>
+            <Table className="rows-lazy">
               <thead>
                 <tr>
                   <Th>Desk</Th>
@@ -240,10 +240,25 @@ export function SeatsClient() {
                       ) : null}
                     </Td>
                     <Td>
+                      {/*
+                        The current holder is always an option, even before the
+                        staff list has loaded.
+
+                        Without it a native select whose `value` matches no
+                        option falls back to the first one — so every allocated
+                        desk read "Nobody — in the pool" for the second or two
+                        the people query takes. That is not a cosmetic flicker:
+                        it is the exact opposite of the truth on a control whose
+                        other states CLEAR an allocation, and an admin acting on
+                        it during that window would unseat somebody.
+
+                        Disabled until the list arrives, for the same reason.
+                      */}
                       <Select
                         className="w-48"
                         aria-label={`Allocate ${s.seatCode} to`}
                         value={s.assignedUserId ?? ""}
+                        disabled={people.isPending || patch.isPending}
                         onChange={(e) =>
                           patch.mutate({
                             seatCode: s.seatCode,
@@ -252,6 +267,12 @@ export function SeatsClient() {
                         }
                       >
                         <option value="">Nobody — in the pool</option>
+                        {s.assignedUserId &&
+                        !(people.data?.users ?? []).some((p) => p.id === s.assignedUserId) ? (
+                          <option value={s.assignedUserId}>
+                            {s.assignedName ?? "Currently allocated"}
+                          </option>
+                        ) : null}
                         {(people.data?.users ?? []).map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.displayName}
