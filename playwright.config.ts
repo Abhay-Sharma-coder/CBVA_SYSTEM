@@ -6,7 +6,18 @@ import { defineConfig, devices } from "@playwright/test";
  * visible reason. PORT overrides it; 8081 is the project default.
  */
 const PORT = Number(process.env.PORT ?? 8081);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+/**
+ * PLAYWRIGHT_BASE_URL points the suite at a deployment instead of a local dev
+ * server. Two things it buys: the walkthrough can be verified against the real
+ * URL a partner will open, and the PRODUCTION BUILD finally gets exercised —
+ * until Phase 5 the suite only ever ran against `next dev`, so nothing had
+ * checked that what Vercel builds behaves the same way.
+ *
+ * The webServer below is skipped when it is set, because there is nothing to
+ * start.
+ */
+const REMOTE = process.env.PLAYWRIGHT_BASE_URL;
+const BASE_URL = REMOTE ?? `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -30,10 +41,12 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: `npm run dev -- -p ${PORT}`,
-    url: BASE_URL,
-    reuseExistingServer: true,
-    timeout: 180_000,
-  },
+  webServer: REMOTE
+    ? undefined
+    : {
+        command: `npm run dev -- -p ${PORT}`,
+        url: BASE_URL,
+        reuseExistingServer: true,
+        timeout: 180_000,
+      },
 });
