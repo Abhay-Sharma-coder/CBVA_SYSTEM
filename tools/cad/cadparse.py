@@ -246,14 +246,42 @@ def in_plan_box(x, y):
 # --------------------------------------------------------------------------
 
 class Path:
-    __slots__ = ("layer", "ctm", "subpaths", "local", "painted")
+    """
+    One painted path.
 
-    def __init__(self, layer, ctm, subpaths, local, painted):
+    `stroke` and `fill` are DeviceRGB triples in 0..1. They are retained
+    because in this drawing colour is not decoration -- it is a key. The
+    architect's legend assigns a stroke colour per furniture type, and
+    P-FULLHEIGHT PARTITION carries the real room dividers in black alongside
+    5,012 orange hatch paths that are not walls at all. Without the colour
+    those two are indistinguishable; with it the layer separates cleanly.
+
+    Every colour in this file is a plain 3-operand DeviceRGB `RG`/`rg`: there
+    is not one `sc`, `scn`, `SCN`, `g`, `G`, `k` or `K` operator in the whole
+    content stream, which is why three lines of tracking is enough.
+    """
+
+    __slots__ = ("layer", "ctm", "subpaths", "local", "painted", "stroke", "fill")
+
+    def __init__(self, layer, ctm, subpaths, local, painted,
+                 stroke=(0.0, 0.0, 0.0), fill=(0.0, 0.0, 0.0)):
         self.layer = layer          # CAD layer name
         self.ctm = ctm              # matrix in force when the path was painted
         self.subpaths = subpaths    # [[(x, y), ...]] in PLAN space
         self.local = local          # the same points, pre-CTM
         self.painted = painted      # 'S' stroked / 'f' filled
+        self.stroke = stroke        # DeviceRGB 0..1, in force at paint time
+        self.fill = fill            # DeviceRGB 0..1, in force at paint time
+
+    def stroke_hex(self):
+        return "#%02X%02X%02X" % tuple(
+            max(0, min(255, int(round(c * 255.0)))) for c in self.stroke
+        )
+
+    def fill_hex(self):
+        return "#%02X%02X%02X" % tuple(
+            max(0, min(255, int(round(c * 255.0)))) for c in self.fill
+        )
 
 
 class Span:
@@ -292,6 +320,8 @@ def read(data, want_layers=None, want_text=True):
 
     paths, spans = [], []
     ctm = IDENT
+    # PDF's initial colour is black in both channels.
+    stroke = fill = (0.0, 0.0, 0.0)
     gstack = []
     oc_stack = []
     layer = None
@@ -318,7 +348,7 @@ def read(data, want_layers=None, want_text=True):
                         keep = True
                 plan.append(pts)
             if keep:
-                paths.append(Path(layer, ctm, plan, cur, painted))
+                paths.append(Path(layer, ctm, plan, cur, painted, stroke, fill))
         cur, sub = [], []
 
     for kind, val in tokenize(content):
@@ -332,10 +362,21 @@ def read(data, want_layers=None, want_text=True):
         op = val
 
         if op == b"q":
-            gstack.append(ctm)
+            # Colour rides the stack WITH the ctm. The drawing sets RG inside
+            # nested q/Q blocks, so a bare global would leak one block's colour
+            # into the next and mis-attribute paths wholesale.
+            gstack.append((ctm, stroke, fill))
         elif op == b"Q":
             if gstack:
-                ctm = gstack.pop()
+                ctm, stroke, fill = gstack.pop()
+        elif op == b"RG" and len(operands) >= 3:
+            nums = [o for o in operands if isinstance(o, float)]
+            if len(nums) >= 3:
+                stroke = tuple(nums[-3:])
+        elif op == b"rg" and len(operands) >= 3:
+            nums = [o for o in operands if isinstance(o, float)]
+            if len(nums) >= 3:
+                fill = tuple(nums[-3:])
         elif op == b"cm" and len(operands) >= 6:
             nums = [o for o in operands if isinstance(o, float)]
             if len(nums) >= 6:

@@ -42,7 +42,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 PDF = os.path.join(HERE, "09 -R8 - NB -FURNITURE LAYOUT - 12-06-2025.pdf")
 OUT = os.path.join(ROOT, "src", "data", "floorplan")
 
-GENERATOR_VERSION = 3
+GENERATOR_VERSION = 4
 
 # The shell. I-DOOR is deliberately absent: those are the swing arcs, and they
 # are noise in 2D and wrong in 3D.
@@ -66,10 +66,44 @@ GLAZING_LAYERS = {"G-GLASS", "W-WINDOW"}
 # because SVGLoader and ExtrudeGeometry choke on CAD complexity; Phase 4
 # extrudes these as merged segment boxes (ADR-030), where 534 chains is three
 # draw calls and ~25k triangles. So the ceiling moves to 600 and stays honest.
+#
+# THE PARTITION FILTER (ADR-042). P-FULLHEIGHT PARTITION is 6,444 paths and
+# 97% of them are not partitions. Measured from the PDF, by stroke colour:
+#
+#     #FF4405  5,012 paths  len 34,916  x 562-1263, y 355-996  (C and D only)
+#     #0037DD  1,152 paths  len  1,473  a narrow vertical band
+#     #000000    200 paths  len  9,347  x 169-1279, y 191-976  (whole floor)
+#     #006EDD     52 paths  len    351
+#     #8AB85C     28 paths  len    398  one 31x31 unit symbol
+#
+# The 200 black paths are the real full-height room dividers -- ~47 units each
+# and spread over the whole floor. The orange is the dot fill of the solid
+# rapid-rail benches, at 7 units a path; the blue is finer fill again. Flat on
+# a drawing they are texture. Extruded to 1.35 m they are a thicket of walls
+# through the middle of every workstation bay.
+#
+# The filter runs on the class's INPUT, not inside build_walls(): by the time
+# that function is chaining, paths have been dissolved into an edge graph keyed
+# only on coordinate and the colour is gone.
+#
+# Only the extruded shell filters. The baked texture still paints every colour
+# on this layer -- it is the architect's drawing and nothing is deleted from
+# it -- and planmask still rasterises the whole layer, because narrowing the
+# flood fill's input would move interiorCoverage and with it coreCentre and
+# every zone hull.
+# Scoped to P-FULLHEIGHT PARTITION alone. I-PART-FULL is 12 paths stroked
+# #595959, all of them real partition, and a blanket black test would drop
+# them -- the colour key belongs to the one layer that carries a key.
+def real_partitions(path):
+    if path.layer != "P-FULLHEIGHT PARTITION":
+        return True
+    return path.stroke_hex() == "#000000"
+
+
 WALL_CLASSES = (
-    ("wall", {"W-WALL", "K-WALL", "C- COLOUMN", "K-COLS", "I-WALL", "B- BEAM"}, 150),
-    ("partition", {"P-FULLHEIGHT PARTITION", "I-PART-FULL"}, 200),
-    ("glazing", GLAZING_LAYERS, 300),
+    ("wall", {"W-WALL", "K-WALL", "C- COLOUMN", "K-COLS", "I-WALL", "B- BEAM"}, 150, None),
+    ("partition", {"P-FULLHEIGHT PARTITION", "I-PART-FULL"}, 200, real_partitions),
+    ("glazing", GLAZING_LAYERS, 300, None),
 )
 
 BAY_RE = re.compile(r"^(A[12]|C[1-7]|D[1-8])$")
@@ -168,7 +202,7 @@ def is_hatch(points, min_points=6, reversal_share=0.8):
 
 
 def build_walls(paths, layers=WALL_LAYERS, snap=1.0, simplify=1.2,
-                min_length=10.0, max_polys=400):
+                min_length=10.0, max_polys=400, keep=None):
     """
     The raw wall layers are 8,603 paths of CAD noise. Chain them into
     polylines and simplify hard: Phase 4 extrudes these, and SVGLoader chokes
@@ -182,6 +216,8 @@ def build_walls(paths, layers=WALL_LAYERS, snap=1.0, simplify=1.2,
     seen = set()
     for p in paths:
         if p.layer not in layers:
+            continue
+        if keep is not None and not keep(p):
             continue
         for sp in p.subpaths:
             for a, b in zip(sp, sp[1:]):
@@ -690,8 +726,8 @@ def main():
 
     # ---- walls, one chained run per class
     walls = []
-    for name, layers, budget in WALL_CLASSES:
-        got = build_walls(paths, layers=layers, max_polys=budget)
+    for name, layers, budget, keep in WALL_CLASSES:
+        got = build_walls(paths, layers=layers, max_polys=budget, keep=keep)
         if len(got) > budget:
             raise SystemExit(f"{name} simplification produced {len(got)} polygons")
         for w in got:
