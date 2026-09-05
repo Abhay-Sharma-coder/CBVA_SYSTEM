@@ -52,3 +52,4 @@ next-env.d.ts
 /tools/cad/.cache.pkl
 /src/data/floorplan/plan-texture.svg
 .check-*.png
+/.tmp
