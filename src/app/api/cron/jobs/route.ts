@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 
-import { auth } from "@/lib/adapters";
 import { errorResponse } from "@/lib/api";
 import { getClock } from "@/lib/clock";
 import { serverEnv } from "@/lib/config";
@@ -39,16 +38,27 @@ async function authorise(request: Request): Promise<boolean> {
     return true;
   }
 
-  // In demo mode an admin may run the jobs from the demo panel. This is what
-  // makes "advance the clock, then watch the desk release" a deterministic
-  // step in a walkthrough rather than a wait for the next interval tick.
-  if (appMode !== "production") {
-    const user = await auth().currentUser();
-    if (user?.isAdmin) return true;
-    // A laptop with no secret configured should not be locked out of its own
-    // demo; production always requires one.
-    if (!cronSecret) return true;
-  }
+  /**
+   * IF A SECRET IS CONFIGURED, IT IS THE ONLY WAY IN. No session shortcut.
+   *
+   * This route used to accept an admin session in demo mode, so the demo panel
+   * could run the jobs. On a laptop that is harmless. On a PUBLIC DEMO URL it
+   * is a hole, and a subtle one: the demo AuthProvider deliberately resolves an
+   * unknown visitor to a seeded admin, so "is the caller an admin?" is true for
+   * anybody on the internet. The deployed endpoint answered 200 to an
+   * unauthenticated POST, which meant a stranger could drive the job loop.
+   *
+   * The bounds added for A22 mean they could not empty the floor with it. That
+   * is not a reason to leave it open.
+   *
+   * The demo panel now calls POST /api/admin/jobs instead, which is gated on an
+   * admin session like every other admin action — the same posture as the rest
+   * of the admin area, rather than a second front door with different rules.
+   *
+   * The no-secret case stays open on purpose: a laptop with nothing configured
+   * should not be locked out of its own demo, and `npm run dev` sets nothing.
+   */
+  if (appMode !== "production" && !cronSecret) return true;
 
   return false;
 }

@@ -72,7 +72,15 @@ export function DemoPanel() {
 
   const runJobs = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/cron/jobs", { method: "POST" });
+      // The ADMIN route, not the cron one. /api/cron/jobs is for the
+      // scheduler and requires the shared secret whenever one is configured —
+      // on a public demo URL an "admin session" is not a gate, because the demo
+      // AuthProvider resolves an unknown visitor to a seeded admin.
+      const res = await fetch("/api/admin/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dryRun: false }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error ?? "The jobs could not be run.");
       return body as JobResult;

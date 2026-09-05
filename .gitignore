@@ -53,3 +53,6 @@ next-env.d.ts
 /src/data/floorplan/plan-texture.svg
 .check-*.png
 /.tmp
+
+.vercel
+.env*
