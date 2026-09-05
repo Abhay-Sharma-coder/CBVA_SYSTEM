@@ -233,16 +233,36 @@ async function insertAgainstRelease(tx: DbLike, args: ReleaseInsert): Promise<[B
       'confirmed'::booking_status, ${args.source}::booking_source,
       r.id, ${args.seriesId}::uuid, ${args.now}::timestamptz, ${args.now}::timestamptz
     from r
-    returning *`);
+    returning id`);
 
-  const booking = rows.rows[0] as unknown as Booking | undefined;
-  if (!booking) {
+  const id = (rows.rows[0] as { id?: string } | undefined)?.id;
+  if (!id) {
     throw new BookingError(
       "SEAT_NOT_BOOKABLE",
       `${args.seat.seatCode} was taken back by the colleague it is allocated to a moment ago. Please pick another desk.`,
     );
   }
-  return [booking];
+
+  /**
+   * Re-read through the query builder rather than `returning *`.
+   *
+   * `db.execute` hands back the driver's RAW rows — snake_case keys, no column
+   * mapping — so `returning *` produced an object with `updated_at` rather than
+   * `updatedAt`. Everything downstream reads the camelCase shape, and the one
+   * that matters is `updatedAt`: it IS the optimistic lock. A booking made on a
+   * released desk would have serialised `updatedAt: undefined`, and the first
+   * attempt to edit it would have failed the lock comparison with a stale-row
+   * error nobody could act on.
+   *
+   * Caught by the test asserting `releaseId` was set, which is the same bug
+   * wearing a less alarming hat.
+   */
+  const [booking] = await (tx as Db)
+    .select()
+    .from(schema.bookings)
+    .where(eq(schema.bookings.id, id))
+    .limit(1);
+  return [booking!];
 }
 
 /* ------------------------------------------------------------------ create */

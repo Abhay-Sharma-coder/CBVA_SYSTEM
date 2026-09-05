@@ -138,6 +138,119 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
       await page.locator(".qr-card").first().waitFor({ timeout: 30_000 });
     },
   ],
+
+  /* ------------------------------------------------- Phase 5 surfaces ---
+   *
+   * The analytics screens are the deliverable and carry the densest content in
+   * the product — nine widgets, five tables and seven SVG figures on Trends
+   * alone. They are also the screens most likely to grow an unlabelled control
+   * as they change, so they are swept rather than trusted.
+   *
+   * /admin was previously not covered at all, which is how it kept an entirely
+   * missing authorisation check for four phases.
+   */
+  [
+    "admin index",
+    "/admin",
+    async (page) => {
+      await page.getByRole("heading", { level: 1, name: "Admin" }).waitFor();
+    },
+  ],
+  [
+    "analytics — trends",
+    "/admin/analytics",
+    async (page) => {
+      await page
+        .getByRole("heading", { name: "Desks needed against desks held" })
+        .waitFor({ timeout: 90_000 });
+    },
+  ],
+  [
+    "analytics — today",
+    "/admin/analytics/today",
+    async (page) => {
+      await page.getByRole("heading", { level: 1, name: "Today on the floor" }).waitFor();
+      await page.waitForTimeout(2_000);
+    },
+  ],
+  [
+    "analytics — forecast",
+    "/admin/analytics/forecast",
+    async (page) => {
+      await page
+        .getByRole("heading", { name: /working days/ })
+        .waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "seat inventory",
+    "/admin/seats",
+    async (page) => {
+      await page.getByRole("heading", { name: "All desks" }).waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "people",
+    "/admin/users",
+    async (page) => {
+      await page
+        .getByRole("heading", { level: 3, name: "People" })
+        .waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "settings",
+    "/admin/settings",
+    async (page) => {
+      await page.getByRole("heading", { name: "Booking rules" }).waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "audit log",
+    "/admin/audit",
+    async (page) => {
+      await page.getByRole("heading", { name: /Audit log/ }).waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "scheduled jobs",
+    "/admin/jobs",
+    async (page) => {
+      await page
+        .getByRole("heading", { name: /What the next run would do/ })
+        .waitFor({ timeout: 60_000 });
+    },
+  ],
+  [
+    "who is in",
+    "/who",
+    async (page) => {
+      await page.getByRole("heading", { level: 1, name: /Who/ }).waitFor();
+      await page.waitForTimeout(2_500);
+    },
+  ],
+  [
+    "your settings",
+    "/me",
+    async (page) => {
+      await page.getByRole("switch").first().waitFor({ timeout: 30_000 });
+    },
+  ],
+  [
+    "my desk — releases and repeats",
+    "/bookings",
+    async (page) => {
+      await page.getByRole("tab", { name: /My desk/ }).click();
+      await page.waitForTimeout(1_500);
+    },
+  ],
+  [
+    "check-in page",
+    "/checkin/C5-01",
+    async (page) => {
+      await page.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 30_000 });
+    },
+  ],
 ];
 
 for (const [name, path, prepare] of CASES) {

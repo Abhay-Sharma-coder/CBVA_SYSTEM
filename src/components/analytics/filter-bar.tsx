@@ -243,9 +243,12 @@ export function FilterBar({
 export function MeasureExplainer({ measure }: { measure: MeasureKey }) {
   return (
     <div className="rounded-md border border-hairline bg-surface-sunken p-3">
-      <h3 className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+      {/* h2: this block is a sibling of the cards, directly under the page h1,
+          so an h3 here skips a level. font-sans because globals.css reserves
+          the serif for the page title. */}
+      <h2 className="font-sans text-xs font-medium tracking-wide text-ink-subtle uppercase">
         What these numbers mean
-      </h3>
+      </h2>
       <dl className="mt-2 grid gap-3 sm:grid-cols-3">
         {MEASURE_KEYS.map((k) => {
           const m = MEASURES[k];

@@ -34,13 +34,31 @@ export function CardHeader({
   );
 }
 
+/**
+ * Renders an `<h2>` by default, not an `<h3>`.
+ *
+ * A card is a section of the page and the page title is the `<h1>` above it, so
+ * h1 → h3 skips a level — which axe flags and a screen-reader user experiences
+ * as a missing section. Pass `level={3}` for a card nested inside another
+ * titled section.
+ *
+ * `font-sans` is explicit because globals.css puts the serif on every `h1, h2`
+ * as the page-title face. That rule is about the VISUAL role, and a card title
+ * is not a page title; without this, promoting the level would have quietly put
+ * Source Serif on every card in the product.
+ */
 export function CardTitle({
+  level = 2,
   className,
   ...props
-}: React.HTMLAttributes<HTMLHeadingElement>) {
+}: React.HTMLAttributes<HTMLHeadingElement> & { level?: 2 | 3 | 4 }) {
+  const Tag = `h${level}` as "h2" | "h3" | "h4";
   return (
-    <h3
-      className={cn("text-sm font-semibold tracking-tight text-ink", className)}
+    <Tag
+      className={cn(
+        "font-sans text-sm font-semibold tracking-tight text-ink",
+        className,
+      )}
       {...props}
     />
   );
