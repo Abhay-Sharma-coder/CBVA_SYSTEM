@@ -150,6 +150,20 @@
   }
 
   body {
+    /*
+     * Stops a wide child expanding the LAYOUT VIEWPORT on a phone.
+     *
+     * The room grid (13 hour columns) and the audit log both sit inside their
+     * own `overflow-x: auto` scroller and neither makes the page scroll
+     * sideways — but Chrome on mobile still widens the layout viewport to the
+     * widest content it finds, so /rooms rendered at 733 CSS px on a 393 px
+     * device: no overflow, everything just silently half-size and unreadable.
+     *
+     * `clip` rather than `hidden` on purpose. `hidden` makes body a scroll
+     * container, which breaks `position: sticky` on any ancestor path through
+     * it — and the room grid's first column and the app header are both sticky.
+     */
+    overflow-x: clip;
     background-color: var(--cbva-paper);
     color: var(--cbva-ink);
     font-family: var(--font-sans);
