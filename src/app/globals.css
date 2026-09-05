@@ -57,6 +57,42 @@
   --seat-blocked-fill: var(--cbva-surface-sunken);
   --seat-blocked-line: var(--cbva-ink);
 
+  /* ---- charts ----
+     Phase 5. The brand palette is deliberately dark and desaturated, which is
+     right for a professional-services interface and WRONG as a categorical
+     chart palette: run the four brand colours through a CVD check and navy and
+     the green fail the chroma floor, and amber/green sit at ΔE 12.8 for normal
+     vision — two series a full-colour reader cannot reliably tell apart.
+
+     So charts get their own steps, in the same hue families, chosen by
+     measurement rather than by eye. This exact order passes all six checks
+     against --paper: lightness band, chroma floor, CVD separation (worst
+     adjacent pair ΔE 12.0 deutan), normal-vision floor (16.3) and 3:1 contrast.
+     THE ORDER IS PART OF THE RESULT — the checks are on ADJACENT pairs, and
+     reordering these four reintroduces a failure. Assign them in sequence and
+     never cycle: a ninth series folds into "Other" or becomes a small multiple.
+
+     Gold is deliberately absent. It is the accent, and a chart is the easiest
+     place in a product to spend 40% of the pixels on it by accident. */
+  --cbva-chart-1: #a86e08;
+  --cbva-chart-2: #3d5bb8;
+  --cbva-chart-3: #4e9e73;
+  --cbva-chart-4: #b03a2e;
+
+  /* Sequential, for magnitude — the bay heat map. ONE hue, light to dark,
+     monotonic in lightness. Never a rainbow: a rainbow ramp implies category
+     boundaries where there is only a continuum, and it is unreadable in
+     greyscale, which is how partners print these. */
+  --cbva-heat-0: var(--cbva-surface-sunken);
+  --cbva-heat-1: color-mix(in srgb, var(--cbva-navy) 12%, var(--cbva-paper));
+  --cbva-heat-2: color-mix(in srgb, var(--cbva-navy) 28%, var(--cbva-paper));
+  --cbva-heat-3: color-mix(in srgb, var(--cbva-navy) 48%, var(--cbva-paper));
+  --cbva-heat-4: color-mix(in srgb, var(--cbva-navy) 70%, var(--cbva-paper));
+  --cbva-heat-5: var(--cbva-navy);
+
+  /* Recessive chart furniture. Grid lines must never compete with the data. */
+  --cbva-grid: color-mix(in srgb, var(--cbva-hairline) 70%, var(--cbva-paper));
+
   /* ---- geometry ---- */
   --cbva-radius: 4px;
   --cbva-radius-sm: 2px;
@@ -82,6 +118,12 @@
   --color-positive: var(--cbva-positive);
   --color-caution: var(--cbva-caution);
   --color-danger: var(--cbva-danger);
+
+  --color-chart-1: var(--cbva-chart-1);
+  --color-chart-2: var(--cbva-chart-2);
+  --color-chart-3: var(--cbva-chart-3);
+  --color-chart-4: var(--cbva-chart-4);
+  --color-grid: var(--cbva-grid);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;

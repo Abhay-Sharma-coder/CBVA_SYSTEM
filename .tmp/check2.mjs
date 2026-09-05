@@ -1,0 +1,10 @@
+import { chromium } from "@playwright/test";
+const b = await chromium.launch();
+const p = await b.newPage();
+p.on("console", (m) => console.log("CONSOLE", m.type(), m.text().slice(0,300)));
+p.on("pageerror", (e) => console.log("PAGEERROR", e.message.slice(0,400)));
+p.on("response", (r) => r.url().includes("/api/") && console.log("API", r.status(), r.url().slice(0,110)));
+await p.goto("http://127.0.0.1:8081/admin/analytics", { waitUntil: "networkidle", timeout: 60000 });
+await p.waitForTimeout(2500);
+console.log("MAIN TEXT:", (await p.locator("main").innerText()).slice(0, 600));
+await b.close();

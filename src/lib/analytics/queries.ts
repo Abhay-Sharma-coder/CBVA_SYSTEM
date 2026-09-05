@@ -31,21 +31,15 @@ import {
 } from "./measures";
 import { minutesOfDay, type SlotDefinition } from "@/lib/slots";
 import { schema, type Db } from "@/lib/db";
+import type {
+  AnalyticsFilters, CapacityRow, DaySlotRow, DimensionRow, HeatCell, Headline,
+  BookingExportRow, SeatUtilisationRow, WeekdayRow, MeasureRow,
+} from "./types";
+
+export * from "./types";
 
 /* ------------------------------------------------------------------ filters */
 
-export interface AnalyticsFilters {
-  /** yyyy-MM-dd, inclusive. */
-  from: string;
-  /** yyyy-MM-dd, inclusive. */
-  to: string;
-  /** Zone code, e.g. "C". Null means the whole floor. */
-  zone?: string | null;
-  bay?: string | null;
-  team?: string | null;
-  /** Restrict to one slot key. Null means every slot. */
-  slot?: string | null;
-}
 
 /**
  * The one WHERE clause every measure shares. Filters are applied to the JOINED
@@ -85,21 +79,6 @@ function measureColumns(now: Date) {
     ${seatHoursIfNoShowWereFree(now)} as seat_hours_no_show_free`;
 }
 
-export interface MeasureRow {
-  desksClaimed: number;
-  claims: number;
-  peopleClaiming: number;
-  desksAttended: number;
-  peopleAttended: number;
-  deskVerified: number;
-  badgeOnly: number;
-  noShows: number;
-  autoReleased: number;
-  cancellations: number;
-  /** `numeric` arrives from pg as a string. Deliberate — see the conventions. */
-  seatHours: number;
-  seatHoursNoShowFree: number;
-}
 
 function toMeasureRow(r: Record<string, unknown>): MeasureRow {
   return {
@@ -120,27 +99,6 @@ function toMeasureRow(r: Record<string, unknown>): MeasureRow {
 
 /* ----------------------------------------------------------------- capacity */
 
-export interface CapacityRow {
-  date: string;
-  slot: string;
-  /**
-   * The STRUCTURAL supply: desks whose own status is `bookable` and which were
-   * active on this date. 93 today. This is the headline denominator — a partner
-   * may reclaim a released desk at any time, so released fixed desks are not
-   * supply anybody can plan against.
-   */
-  pool: number;
-  /**
-   * The supply that actually existed in this slot: `pool` plus fixed desks
-   * their owners had released. Utilisation against this is the honest
-   * operational number.
-   */
-  capacity: number;
-  releasedFixed: number;
-  /** Slot length in hours, from settings — not derived from any booking. */
-  slotHours: number;
-  seatHourCapacity: number;
-}
 
 /**
  * Capacity per date and slot.
@@ -230,12 +188,6 @@ export async function capacityByDaySlot(
 
 /* -------------------------------------------------------------- by day/slot */
 
-export interface DaySlotRow extends MeasureRow {
-  date: string;
-  slot: string;
-  /** ISO weekday, 1 = Monday. */
-  weekday: number;
-}
 
 export async function occupancyByDaySlot(
   db: Db,
@@ -276,9 +228,6 @@ const DIMENSIONS = {
 
 export type Dimension = keyof typeof DIMENSIONS;
 
-export interface DimensionRow extends MeasureRow {
-  key: string;
-}
 
 export async function occupancyBy(
   db: Db,
@@ -302,16 +251,6 @@ export async function occupancyBy(
 
 /* ----------------------------------------------------------------- heat map */
 
-export interface HeatCell {
-  bay: string;
-  zone: string;
-  weekday: number;
-  desksClaimed: number;
-  desksAttended: number;
-  seatHours: number;
-  /** Distinct dates in the period that fell on this weekday and had data. */
-  observedDays: number;
-}
 
 /**
  * Bay × weekday. The visual that makes the Monday-and-Friday argument in one
@@ -326,19 +265,44 @@ export async function heatmapByBayWeekday(
   f: AnalyticsFilters,
   now: Date,
 ): Promise<HeatCell[]> {
+  /**
+   * PER (bay, date, slot) FIRST, THEN AVERAGED — and this is the whole
+   * correctness of the chart.
+   *
+   * `count(distinct seat_id)` grouped straight to (bay, weekday) counts every
+   * desk that was used on ANY Monday in the period, which over eight weeks is
+   * very nearly all of them. Every cell then saturates to the bay's own size
+   * and the heat map renders a picture of which bays are biggest — a floor
+   * plan, not a finding. The same trap as occupancyByWeekday, and it is easy to
+   * fall into twice.
+   *
+   * `desksClaimed` here is therefore the MEAN desks in use in a single slot of
+   * that weekday, which is directly comparable to the bay's desk count.
+   */
   const rows = await db.execute(sql`
+    with per_slot as (
+      select
+        s.bay,
+        z.code as zone,
+        b.booking_date as day,
+        b.slot,
+        extract(isodow from b.booking_date)::int as weekday,
+        count(distinct b.seat_id) filter (where ${BOOKED}) as desks,
+        count(distinct b.seat_id) filter (where ${ATTENDED}) as attended,
+        ${seatHoursConsumed(now)} as hours
+      ${FROM}
+      where ${whereClause(f)}
+      group by s.bay, z.code, b.booking_date, b.slot
+    )
     select
-      s.bay,
-      z.code as zone,
-      extract(isodow from b.booking_date)::int as weekday,
-      ${desksClaimed} as desks_claimed,
-      ${desksAttended} as desks_attended,
-      ${seatHoursConsumed(now)} as seat_hours,
-      count(distinct b.booking_date)::int as observed_days
-    ${FROM}
-    where ${whereClause(f)}
-    group by s.bay, z.code, extract(isodow from b.booking_date)
-    order by z.code, s.bay, weekday`);
+      bay, zone, weekday,
+      round(avg(desks), 2)::float8    as desks_claimed,
+      round(avg(attended), 2)::float8 as desks_attended,
+      round(avg(hours), 2)::float8    as seat_hours,
+      count(distinct day)::int        as observed_days
+    from per_slot
+    group by bay, zone, weekday
+    order by zone, bay, weekday`);
 
   return (rows.rows as Record<string, unknown>[]).map((r) => ({
     bay: String(r.bay),
@@ -353,22 +317,6 @@ export async function heatmapByBayWeekday(
 
 /* ----------------------------------------------------------------- headline */
 
-export interface Headline {
-  /** The busiest single slot observed in the period. */
-  peak: number;
-  peakDate: string | null;
-  peakSlot: string | null;
-  /** What you would actually right-size against. */
-  p95: number;
-  median: number;
-  /** Structural bookable supply on the peak day. */
-  pool: number;
-  /** Distinct people who claimed a desk at any point in the period. */
-  distinctPeople: number;
-  observedSlots: number;
-  from: string;
-  to: string;
-}
 
 /**
  * The business case, in one sentence: "peak demand over 8 weeks was N desks
@@ -433,26 +381,6 @@ export async function headline(db: Db, f: AnalyticsFilters, now: Date): Promise<
 
 /* ------------------------------------------------------------- the raw rows */
 
-export interface BookingExportRow {
-  bookingDate: string;
-  slot: string;
-  seatCode: string;
-  bay: string;
-  zone: string;
-  occupantName: string;
-  occupantEmail: string;
-  grade: string;
-  team: string | null;
-  status: string;
-  source: string;
-  checkedInAt: string | null;
-  checkInMethod: string | null;
-  releasedAt: string | null;
-  cancelledAt: string | null;
-  seatHours: number;
-  fromReleasedFixedSeat: boolean;
-  recurring: boolean;
-}
 
 /** Every booking behind the numbers, for the CSV export. */
 export async function bookingRows(
@@ -511,19 +439,6 @@ export async function bookingRows(
 
 /* ------------------------------------------------------- per-seat utilisation */
 
-export interface SeatUtilisationRow {
-  seatCode: string;
-  bay: string;
-  zone: string;
-  seatStatus: string;
-  /** Slots in the period this desk was claimed for. */
-  slotsClaimed: number;
-  slotsAttended: number;
-  seatHours: number;
-  /** Slots the desk was available across the period. */
-  slotsAvailable: number;
-  utilisationPct: number;
-}
 
 /**
  * Per-desk utilisation across the period. This is the table that answers
@@ -619,19 +534,6 @@ export async function filterOptions(db: Db): Promise<{
 
 /* ------------------------------------------------------- weekday, correctly */
 
-export interface WeekdayRow {
-  /** ISO weekday, 1 = Monday. */
-  weekday: number;
-  slot: string;
-  /** Mean desks claimed on a single day of this weekday. */
-  meanDesks: number;
-  meanAttended: number;
-  meanSeatHours: number;
-  peakDesks: number;
-  minDesks: number;
-  /** How many days of this weekday the period actually contained. */
-  observedDays: number;
-}
 
 /**
  * Day-of-week pattern — the Mondays-and-Fridays-are-dead chart.
@@ -689,4 +591,3 @@ export async function occupancyByWeekday(
   }));
 }
 
-export const WEEKDAY_LABELS = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
