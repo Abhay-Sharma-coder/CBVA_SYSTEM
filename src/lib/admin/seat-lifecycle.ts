@@ -28,6 +28,7 @@ import { writeAudit } from "@/lib/audit";
 import { assertAdmin } from "@/lib/booking/authorise";
 import { BookingError } from "@/lib/booking/errors";
 import { futureBookingsForSeat, futureBookingsForUser } from "@/lib/booking/queries";
+import { revokeFutureReleasesForSeat } from "@/lib/booking/seat-release";
 import { cancelBooking } from "@/lib/booking/service";
 import type { Clock } from "@/lib/clock";
 import { schema, type Db } from "@/lib/db";
@@ -46,6 +47,8 @@ export interface SeatStatusChangeResult {
   seatCode: string;
   status: SeatStatus;
   cancelledBookingIds: string[];
+  /** Live future releases invalidated by the change. See the note below. */
+  revokedReleases: number;
 }
 
 export async function changeSeatStatus(
@@ -101,21 +104,176 @@ export async function changeSeatStatus(
     }
   }
 
+  /**
+   * A desk that is no longer `fixed`, or that has gone out of service, must not
+   * leave live releases behind it.
+   *
+   * A release on a desk nobody is allocated to is meaningless, and — because
+   * capacity counts a released fixed desk — leaving one live would keep adding
+   * a phantom desk to every occupancy denominator for that day. That is the
+   * quietest possible way to make the analytics wrong.
+   */
+  let revokedReleases = 0;
+  if (seat.status === "fixed" && nextStatus !== "fixed") {
+    revokedReleases = await revokeFutureReleasesForSeat(ctx.db, seat.id, now, ctx.actor.id);
+  } else if (UNBOOKABLE.has(nextStatus) && nextStatus !== "fixed") {
+    revokedReleases = await revokeFutureReleasesForSeat(ctx.db, seat.id, now, ctx.actor.id);
+  }
+
+  /**
+   * Allocation follows status, in both directions.
+   *
+   * `users.fixed_seat_id` and `seats.assigned_user_id` are two halves of one
+   * fact, and until Phase 5 only the seed ever wrote either of them. A desk
+   * that stops being fixed while still naming an occupant would show that
+   * person's name on a hot desk anybody can book.
+   */
+  const clearAllocation = nextStatus !== "fixed" && seat.assignedUserId !== null;
+
   await ctx.db
     .update(schema.seats)
-    .set({ status: nextStatus })
+    .set({ status: nextStatus, ...(clearAllocation ? { assignedUserId: null } : {}) })
     .where(eq(schema.seats.id, seat.id));
+
+  if (clearAllocation && seat.assignedUserId) {
+    await ctx.db
+      .update(schema.users)
+      .set({ fixedSeatId: null })
+      .where(eq(schema.users.id, seat.assignedUserId));
+  }
 
   await writeAudit(ctx.db, {
     actorUserId: ctx.actor.id,
     entity: "seats",
     entityId: seat.id,
     action: "update_status",
-    before: { status: seat.status },
-    after: { status: nextStatus, cancelledBookings: cancelledBookingIds.length },
+    before: { status: seat.status, assignedUserId: seat.assignedUserId },
+    after: {
+      status: nextStatus,
+      assignedUserId: clearAllocation ? null : seat.assignedUserId,
+      cancelledBookings: cancelledBookingIds.length,
+      revokedReleases,
+    },
   });
 
-  return { seatCode, status: nextStatus, cancelledBookingIds };
+  return { seatCode, status: nextStatus, cancelledBookingIds, revokedReleases };
+}
+
+export interface AssignSeatResult {
+  seatCode: string;
+  assignedUserId: string | null;
+  previousUserId: string | null;
+  cancelledBookingIds: string[];
+}
+
+/**
+ * Allocate a desk to somebody, or clear the allocation.
+ *
+ * Answering ASSUMPTIONS A2 — which physical desks are allocated — is a
+ * five-minute job in this screen rather than a code change, which is the whole
+ * point of building it. Both halves of the relationship are written in one
+ * transaction, because `seats_assigned_user_unique` means a half-written
+ * allocation is a constraint violation waiting for the next edit.
+ */
+export async function assignFixedSeat(
+  ctx: LifecycleContext,
+  seatCode: string,
+  userId: string | null,
+  options: { force?: boolean } = {},
+): Promise<AssignSeatResult> {
+  assertAdmin(ctx.actor);
+  const now = ctx.clock.now();
+
+  const [seat] = await ctx.db
+    .select()
+    .from(schema.seats)
+    .where(eq(schema.seats.seatCode, seatCode))
+    .limit(1);
+  if (!seat) throw new BookingError("SEAT_NOT_FOUND", `There is no desk ${seatCode}.`);
+
+  const cancelledBookingIds: string[] = [];
+
+  if (userId) {
+    const [user] = await ctx.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!user) throw new BookingError("USER_NOT_FOUND", "That person is not on the staff list.");
+
+    // Allocating a hot desk takes it out of the bookable pool, so it is the
+    // same destructive act as blocking one and gets the same treatment.
+    const affected = await futureBookingsForSeat(ctx.db, seat.id, now);
+    if (affected.length > 0 && !options.force) {
+      throw new BookingError(
+        "SEAT_HAS_FUTURE_BOOKINGS",
+        `${seatCode} has ${affected.length} booking${
+          affected.length === 1 ? "" : "s"
+        } still to come. Confirm to cancel and reallocate.`,
+        { affected },
+      );
+    }
+    for (const booking of affected) {
+      await cancelBooking(ctx, {
+        bookingId: booking.id,
+        force: true,
+        byAdmin: true,
+        reason: `${seatCode} has been allocated as a fixed desk, so this booking has been cancelled. Please book another desk.`,
+      });
+      cancelledBookingIds.push(booking.id);
+    }
+  }
+
+  await ctx.db.transaction(async (tx) => {
+    // Clear the previous holder first, or seats_assigned_user_unique refuses
+    // the move while both rows briefly point at the same person.
+    if (seat.assignedUserId) {
+      await tx
+        .update(schema.users)
+        .set({ fixedSeatId: null })
+        .where(eq(schema.users.id, seat.assignedUserId));
+    }
+    if (userId) {
+      // And release whatever desk this person held before, so nobody ends up
+      // holding two.
+      await tx
+        .update(schema.seats)
+        .set({ status: "bookable", assignedUserId: null })
+        .where(eq(schema.seats.assignedUserId, userId));
+    }
+
+    await tx
+      .update(schema.seats)
+      .set({ status: userId ? "fixed" : "bookable", assignedUserId: userId })
+      .where(eq(schema.seats.id, seat.id));
+
+    if (userId) {
+      await tx
+        .update(schema.users)
+        .set({ fixedSeatId: seat.id, seatMode: "fixed" })
+        .where(eq(schema.users.id, userId));
+    }
+
+    await writeAudit(tx, {
+      actorUserId: ctx.actor.id,
+      entity: "seats",
+      entityId: seat.id,
+      action: "update_status",
+      before: { status: seat.status, assignedUserId: seat.assignedUserId },
+      after: { status: userId ? "fixed" : "bookable", assignedUserId: userId },
+    });
+  });
+
+  if (!userId) {
+    await revokeFutureReleasesForSeat(ctx.db, seat.id, now, ctx.actor.id);
+  }
+
+  return {
+    seatCode,
+    assignedUserId: userId,
+    previousUserId: seat.assignedUserId,
+    cancelledBookingIds,
+  };
 }
 
 export interface DeactivateResult {

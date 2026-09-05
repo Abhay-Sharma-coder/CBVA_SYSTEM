@@ -84,7 +84,12 @@ export function errorResponse(err: unknown): NextResponse {
 }
 
 /** Wraps a handler so every route reports failures identically. */
-export async function handle(fn: () => Promise<NextResponse>): Promise<NextResponse> {
+/**
+ * Widened to `Response` in Phase 5 so the CSV exports can stream a plain
+ * Response with their own content-type and Content-Disposition. Every error
+ * path still returns a NextResponse, so the error shape is unchanged.
+ */
+export async function handle(fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (err) {

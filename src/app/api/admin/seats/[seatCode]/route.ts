@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { handle, parseBody, routeContext } from "@/lib/api";
-import { changeSeatStatus } from "@/lib/admin/seat-lifecycle";
+import { assignFixedSeat, changeSeatStatus } from "@/lib/admin/seat-lifecycle";
 import { assertAdmin } from "@/lib/booking/authorise";
 import { BookingError } from "@/lib/booking/errors";
 import { dispatchSoon } from "@/lib/notifications/outbox";
@@ -17,6 +17,14 @@ const patchSchema = z
     planY: z.number().finite().optional(),
     rotationDeg: z.number().int().min(0).max(359).optional(),
     status: z.enum(["bookable", "fixed", "blocked", "decommissioned"]).optional(),
+    /**
+     * Allocate this desk to somebody, or `null` to hand it back to the pool.
+     *
+     * Answering ASSUMPTIONS A2 — which physical desks are fixed — is a
+     * five-minute edit here rather than a change to the seed. Setting it
+     * implies `status: "fixed"`; clearing it implies `"bookable"`.
+     */
+    assignedUserId: z.string().uuid().nullable().optional(),
     /**
      * Confirms that the future bookings on this desk may be cancelled.
      *
@@ -60,10 +68,21 @@ export async function PATCH(
     // "does anybody still have this desk booked?" rule lives. Geometry is a
     // plain update; taking a desk away from somebody is not.
     let cancelledBookings = 0;
-    if (patch.status !== undefined && patch.status !== before.status) {
+
+    // Allocation is checked first, because it decides the status: assigning a
+    // desk makes it fixed and clearing the allocation makes it bookable, so a
+    // separate status change afterwards would just be a second chance to
+    // disagree with itself.
+    if (patch.assignedUserId !== undefined) {
+      const result = await assignFixedSeat(ctx, seatCode, patch.assignedUserId, {
+        force: patch.force,
+      });
+      cancelledBookings += result.cancelledBookingIds.length;
+      if (result.cancelledBookingIds.length > 0) dispatchSoon({ db: ctx.db, clock: ctx.clock });
+    } else if (patch.status !== undefined && patch.status !== before.status) {
       const result = await changeSeatStatus(ctx, seatCode, patch.status, { force: patch.force });
-      cancelledBookings = result.cancelledBookingIds.length;
-      if (cancelledBookings > 0) dispatchSoon({ db: ctx.db, clock: ctx.clock });
+      cancelledBookings += result.cancelledBookingIds.length;
+      if (result.cancelledBookingIds.length > 0) dispatchSoon({ db: ctx.db, clock: ctx.clock });
     }
 
     const geometry = {
@@ -89,7 +108,7 @@ export async function PATCH(
         before: { planX: before.planX, planY: before.planY, rotationDeg: before.rotationDeg },
         after: { planX: after.planX, planY: after.planY, rotationDeg: after.rotationDeg },
       });
-    } else if (patch.status !== undefined) {
+    } else if (patch.status !== undefined || patch.assignedUserId !== undefined) {
       const [reloaded] = await ctx.db
         .select()
         .from(schema.seats)
@@ -104,6 +123,7 @@ export async function PATCH(
       planY: Number(after.planY),
       rotationDeg: after.rotationDeg,
       status: after.status,
+      assignedUserId: after.assignedUserId,
       cancelledBookings,
     });
   });

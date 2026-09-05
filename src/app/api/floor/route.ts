@@ -13,6 +13,7 @@ import {
   type SeatDbStatus,
 } from "@/lib/seat-visual-status";
 import type { FloorPlanPayload, FloorPlanSeat } from "@/components/floor-plan/types";
+import { liveReleasesFor } from "@/lib/booking/seat-release";
 import { seatAnchor } from "@/lib/floorplan";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,7 @@ export async function GET(request: Request) {
 
   const seatRows = await database
     .select({
+      seatId: schema.seats.id,
       seatCode: schema.seats.seatCode,
       bay: schema.seats.bay,
       zoneCode: schema.zones.code,
@@ -75,6 +77,10 @@ export async function GET(request: Request) {
     .innerJoin(schema.zones, eq(schema.seats.zoneId, schema.zones.id))
     .leftJoin(schema.users, eq(schema.seats.assignedUserId, schema.users.id));
 
+  // Fixed desks their owners have handed back for exactly this date and slot.
+  // One query, not 141 — the seat loop below reads the Map.
+  const releases = await liveReleasesFor(database, date, slot);
+
   const bookingRows = await database
     .select({
       seatCode: schema.seats.seatCode,
@@ -82,6 +88,7 @@ export async function GET(request: Request) {
       status: schema.bookings.status,
       occupantEmail: schema.users.email,
       occupantName: schema.users.displayName,
+      shareAttendance: schema.users.shareAttendance,
       updatedAt: schema.bookings.updatedAt,
       createdAt: schema.bookings.createdAt,
     })
@@ -127,6 +134,29 @@ export async function GET(request: Request) {
 
   const seats: FloorPlanSeat[] = seatRows.map((row) => {
     const booking = bookingBySeat.get(row.seatCode);
+    const releasedByOwner = releases.has(row.seatId);
+
+    /**
+     * WHOSE NAME IS VISIBLE, AND TO WHOM.
+     *
+     * Until Phase 5 this route returned every occupant's name to anybody who
+     * asked, including a signed-out visitor. That was a real leak and it is
+     * closed here rather than in the UI, because the UI is not the boundary.
+     *
+     * Two rules, in order:
+     *   1. Nobody sees a colleague's name unless they are signed in.
+     *   2. A colleague who has opted out of the roster is not named at all.
+     *
+     * You always see your OWN name, and an opted-out person still shows as a
+     * held desk — the seat status is unchanged, only the label goes. So the
+     * occupancy data is completely unaffected by anyone's privacy choice, which
+     * is the property that lets us offer the opt-out at all.
+     */
+    const isViewersOwn =
+      viewer != null && booking != null && booking.occupantEmail === viewer.email;
+    const mayShowName =
+      isViewersOwn || (viewer != null && (booking?.shareAttendance ?? true));
+
     const input = {
       seatStatus: row.status as SeatDbStatus,
       assignedName: row.assignedName,
@@ -134,6 +164,7 @@ export async function GET(request: Request) {
       occupantEmail: booking?.occupantEmail ?? null,
       occupantName: booking?.occupantName ?? null,
       viewerEmail: viewer?.email ?? null,
+      releasedByOwner,
     };
     const status = seatVisualStatus(input);
     if (countsAsOccupied(status)) occupied += 1;
@@ -153,7 +184,14 @@ export async function GET(request: Request) {
       seatType: row.seatType,
       seatStatus: input.seatStatus,
       status,
-      occupantName: seatOccupantLabel(input),
+      occupantName: mayShowName ? seatOccupantLabel(input) : null,
+      /**
+       * The desk is allocated to somebody who has given it up for this slot.
+       * Not an eighth status — the seat already renders as available or booked
+       * through the ordinary paths — just a line the hover card can add, so it
+       * is obvious WHY a partner's desk is bookable today.
+       */
+      releasedByOwner,
       // Carried so the booking dialog can edit or cancel straight from the
       // plan without a second round trip. Only for the viewer's own booking:
       // nobody needs the id of a desk that is not theirs.

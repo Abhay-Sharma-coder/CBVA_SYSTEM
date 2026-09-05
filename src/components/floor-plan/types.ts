@@ -20,8 +20,19 @@ export interface FloorPlanSeat {
   seatStatus: SeatDbStatus;
   /** Resolved for the viewer, date and slot on screen. */
   status: SeatVisualStatus;
-  /** Occupant name, or the allocated name on a fixed desk. Null when free. */
+  /**
+   * Occupant name, or the allocated name on a fixed desk. Null when free — and
+   * also null when the viewer is signed out, or when the occupant has opted out
+   * of the coworker roster. The desk still reads as held either way; only the
+   * label goes, so no occupancy number depends on anybody's privacy choice.
+   */
   occupantName: string | null;
+  /**
+   * This desk is allocated to somebody who has handed it back for the slot on
+   * screen. Not a status — it already renders as available or booked through
+   * the ordinary paths — just the reason a partner's desk is bookable today.
+   */
+  releasedByOwner: boolean;
   /**
    * The viewer's OWN booking on this desk, when there is one. Null otherwise —
    * including when somebody else has it, because nothing on the plan needs the

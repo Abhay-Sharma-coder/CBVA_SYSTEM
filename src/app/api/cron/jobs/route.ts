@@ -62,7 +62,11 @@ async function run(request: Request): Promise<NextResponse> {
       );
     }
     const clock = await getClock();
-    const result = await runScheduledJobs({ db: db(), clock });
+    // ?dryRun=1 reports what the tick WOULD do and changes nothing. A job that
+    // can rewrite attendance history should be inspectable without running it —
+    // see ASSUMPTIONS A22.
+    const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
+    const result = await runScheduledJobs({ db: db(), clock, dryRun });
     return NextResponse.json(result);
   } catch (err) {
     return errorResponse(err);

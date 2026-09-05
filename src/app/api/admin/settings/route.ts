@@ -32,6 +32,9 @@ const patchSchema = z
     officeHours: z
       .object({ start: z.string(), end: z.string() })
       .optional(),
+    timezone: z.string().min(3).max(64).optional(),
+    autoReleaseBatchCap: z.number().int().min(1).max(10_000).optional(),
+    autoReleaseHorizonDays: z.number().int().min(1).max(365).optional(),
     backfillHistory: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Nothing to change." });
