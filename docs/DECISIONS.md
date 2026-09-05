@@ -742,3 +742,255 @@ people the product is being sold to.
 **Cost.** None worth naming. The handler declines to die and logs; the pool's
 own recovery is unchanged. It is deliberately not silent, because a pool
 erroring repeatedly is a real signal and should be visible in the server log.
+
+---
+
+## ADR-034 — Charts are hand-rolled inline SVG, with a validated palette
+
+**Decision.** No chart library. `src/components/analytics/charts/` holds a
+`ChartFrame` plus bar, line and heat-map components, all inline SVG, all drawing
+from tokens added to the one `:root` block in `globals.css`.
+
+**Why.** Three reasons, in ascending order of how much they would have cost to
+work around. A chart library is a large runtime dependency for four chart types
+in a stack that is pinned exactly on purpose. Every library ships rounded
+corners, drop shadows and its own type scale, all of which have to be fought
+token by token in a design system whose entire thesis is hairlines and 4px
+radii. And a partner is going to **print** these, so greyscale legibility is a
+requirement rather than a nicety — which the bay heat map's single-hue ramp and
+every status glyph exist to satisfy.
+
+**The palette was measured, not chosen.** The brand colours fail as a
+categorical set: navy and the green fall under the chroma floor, and amber
+against green sits at ΔE 12.8 for normal vision — two series a full-colour
+reader cannot reliably separate. So charts get their own steps in the same hue
+families, validated against `--paper` on lightness band, chroma floor, CVD
+separation, normal-vision floor and contrast.
+
+**The ORDER of `--cbva-chart-1..4` is part of the result.** The checks are on
+ADJACENT pairs; amber beside red fails the normal-vision floor at ΔE 12.7, and
+putting green between them passes. Reordering those four tokens is not a style
+change. Two-series charts — which is most of them, because most are split by
+slot — use a separate blue/green pair that separates far better (ΔE 25.0) and
+keeps amber off the largest filled areas, since a bar chart is the easiest place
+in a product to accidentally spend 40% of the pixels on something a partner
+reads as gold.
+
+**Cost.** More code than importing recharts, and every new chart type is ours to
+write. Bought: no dependency, no bundle, no fight with the design system, and
+charts that survive a photocopier.
+
+---
+
+## ADR-035 — The measure vocabulary is one module, and it refuses to answer the open question
+
+**Decision.** `src/lib/analytics/measures.ts` is the single definition of what
+occupancy means — the same role `SEAT_STATUS_TOKENS` plays for seat colour. All
+eight booking statuses are partitioned explicitly by what each is evidence OF,
+and **all three candidate measures ship side by side** rather than one being
+chosen.
+
+**Why not pick one.** CBVA has not decided how an auto-released desk should be
+accounted for. Picking for them and presenting a single confident number would
+be the most damaging thing this product could do, because the number would be
+quoted in a board pack and the assumption behind it would not. Showing seats
+booked, seats attended and seat-hours consumed over identical filters — with the
+definitions on screen beside them — turns the open question into something the
+data can help answer.
+
+**Three traps the module exists to close**, each of which produces a
+plausible-looking wrong number rather than an error:
+
+1. **`released_at` is overloaded.** The job writes it on the
+   `completed_no_show` transition as well as on `auto_released`, and the seed
+   writes a *different* value for the same status. `coalesce(released_at,
+   cancelled_at, ends_at)` therefore under-counts no-show hours by ~50% on demo
+   data and 0% in production. Every arm `CASE`s on status.
+2. **"Seats booked" is three numbers.** `seat_slot_unique` is partial, so an
+   auto-released desk is legitimately rebooked and both rows complete —
+   `count(*)` can exceed capacity, `count(distinct seat_id)` cannot be a demand
+   figure. The gap between them IS the rebooking finding.
+3. **Grouping by weekday cannot use a distinct count.** Over eight weeks nearly
+   every desk is used on some Monday, so every weekday returns ~93 and the chart
+   that exists to show Mondays are dead renders flat. Aggregate per day first,
+   then average. The same trap bit the heat map one query later, where it drew
+   bay SIZE instead of bay utilisation.
+
+**Cost.** Three columns where a client might have wanted one, and an explainer
+that has to be maintained alongside the SQL.
+
+---
+
+## ADR-036 — Releasing an allocated desk is a row, not a status change
+
+**Decision.** `seat_releases` records that a fixed desk is in the pool for one
+date and slot. `seats.status` is untouched.
+
+**Why not flip the seat status.** Status is a property of the DESK; this is a
+property of a desk on a DAY. Flipping it would need flipping back, would be
+wrong for every other date simultaneously, and would leave the floor in a state
+nobody could reconstruct if a job died halfway. A row per (seat, date, slot) is
+the only shape that is correct for one day without being wrong for the next.
+
+**Revoking sets `revoked_at`, never deletes.** Same shape and same reason as
+`seat_slot_unique`: a desk released and later reclaimed is a fact about how the
+floor was used, and the history is the analytics.
+
+**One boolean, and NO eighth seat status.** `seatVisualStatus` takes
+`releasedByOwner` and skips the fixed branch. The seven-status vocabulary is
+proven desaturated on `/styleguide`, bridged by the 3D materials, and rendered
+in three media; an eighth would mean re-proving the colour-vision guarantee for
+a state that is not visually distinct anyway. A released desk simply stops being
+reserved and flows through the existing paths, which also means
+`countsAsCapacity` picks it up for free — which is the entire point of the
+feature.
+
+**The race is revoke-versus-book, and it stays in the database.** The insert
+takes the release `FOR UPDATE` in the same statement; revoke is the mirror
+conditional `UPDATE ... WHERE NOT EXISTS (live booking)`. Reading first and then
+inserting would reintroduce exactly the window ADR-003 closed.
+
+**Reclaiming a taken desk is refused, with the colleague named**, and forcible
+only by an admin — ADR-025's precedent. A forced reclaim goes through the
+ordinary `cancelBooking` and lands as `cancelled_by_admin`, which is the honest
+status and is precisely why ADR-024 kept it separate from a no-show.
+
+---
+
+## ADR-037 — A cancelled occurrence IS the recurring series' exception record
+
+**Decision.** `booking_series` has no exceptions table and no skip list.
+`booking_series_occurrence_unique` on `(series_id, booking_date, slot)` is
+**deliberately NOT partial on status**, so a cancelled occurrence still occupies
+the key and the materialiser's `ON CONFLICT DO NOTHING` finds it.
+
+**Why.** The obvious design is a `series_exceptions` table listing skipped
+dates. That is a second piece of state describing the same fact, and the two
+drift: cancel a booking through the ordinary path and the exception row is not
+written, so the job recreates it tomorrow and the user cancels the same day
+twice. Making the tombstone *be* the cancelled booking means there is nothing to
+keep in sync, and the ordinary cancel path needs no knowledge of series at all.
+
+**The cost, and it is a real one.** `editBooking` is cancel-and-rebook
+(ADR-023), so the rebooked row **must** be inserted with `series_id = NULL`. It
+has detached from the series by definition, and leaving the id on it collides
+with its own tombstone. Miss it and every edit of a recurring booking throws a
+raw index name at the user. It is one line, it is commented at the site, and
+`mapPgError` handles that constraint anyway so the failure would be a sentence
+rather than a stack trace.
+
+**Idempotence is the index, not a watermark.** A "last materialised at" column
+would be wrong the first time somebody winds the demo clock backwards — which is
+a thing this product actively invites.
+
+**A lost race is a notification, not a failure.** Somebody taking the desk first
+is the ordinary case. Known `BookingError` codes are absorbed, recorded and
+emailed once — keyed on `(kind, series_id, occurrence_date, recipient_email)`,
+because the booking that would have carried the usual key was never created.
+Anything unrecognised still throws, because a bug must stay a bug.
+
+---
+
+## ADR-038 — When the auto-release cap trips, nothing is applied
+
+**Decision.** `runAutoRelease` selects `cap + 1` candidate ids per transition.
+If more come back than the cap allows, that transition applies **nothing**,
+writes an `auto_release_capped` audit row, logs, and surfaces on `/admin/jobs`.
+
+**Why not a `LIMIT`.** A `LIMIT 250` is the obvious implementation and it is
+worse than useless. The incident this bound exists for settled 577 bookings in
+one run from a clock set to 2099; with a limit it would have settled them over
+three cron ticks instead — the same catastrophe, three minutes slower, and now
+indistinguishable from normal operation in the audit log. **A bound that only
+slows a runaway down is not a bound.** Stopping dead is what makes a human look.
+
+**Counting before updating is safe here in a way a freeness check is not**, and
+the distinction is worth stating because it superficially resembles the thing
+ADR-003 forbids. The cap is a safety valve, not a uniqueness rule: a couple of
+rows appearing between the count and the `UPDATE` changes nothing that matters.
+The uniqueness argument still lives entirely in the `eq(status, ...)` inside
+each `UPDATE`, which is what makes a concurrent second runner a no-op — and that
+clause must survive any future refactor of this file.
+
+**The horizon is deliberately not applied to the release transition.** Its
+predicate already carries `ends_at > now`, so every candidate is a slot still
+running and nothing can be older than the horizon. Adding the clause would be
+dead code that looks load-bearing.
+
+**Cost.** A settings-backed cap that will be wrong if the floor or the slot
+count changes materially — logged as A26 — and one extra query per transition.
+
+---
+
+## ADR-039 — Analytics types live apart from analytics queries, because `pg` cannot reach the browser
+
+**Decision.** `src/lib/analytics/types.ts` holds every row interface and the
+weekday labels, and imports nothing. `queries.ts` re-exports it for server
+callers; client components import from it directly.
+
+**Why.** `queries.ts` imports `@/lib/db`, which imports `pg`, which needs `fs`.
+A client component importing a single label constant from it dragged the whole
+Postgres driver into the browser bundle and the build failed with
+`Module not found: Can't resolve 'fs'`.
+
+This is ADR-031's trap one layer down, and it fails the same way: not with a
+wrong number but with a build error or a bundle four times bigger than it should
+be. The subtlety is that **types survive erasure and runtime values do not** —
+the file had been importing types safely for an hour before one
+`WEEKDAY_LABELS` broke it.
+
+**Cost.** One more file, and a rule to remember: nothing in `types.ts` may
+import anything with a runtime dependency.
+
+---
+
+## ADR-040 — Error boundaries wrap widgets, never routes
+
+**Decision.** `<WidgetBoundary>` wraps each analytics card. There is still no
+`error.tsx` anywhere in this application.
+
+**Why.** ADR-032 took this position in Phase 4 for the 3D view and it holds
+harder on an analytics screen. A route-level error page replaces the entire
+screen when what has actually failed is one card — and a partner looking at a
+blank page cannot tell whether the product is broken or the floor is empty,
+which is the worst possible ambiguity for a product whose whole claim is that
+its numbers can be trusted. Nine widgets and one bad query should be eight good
+widgets and one apology.
+
+The fallback names the widget, because "something went wrong" on a screen with
+nine panels is not information.
+
+**Cost.** A boundary per card rather than one per route, and a class component
+in a codebase that otherwise has none.
+
+---
+
+## ADR-041 — On a public demo URL, an admin session is not an authorisation
+
+**Decision.** `POST /api/cron/jobs` accepts **only** the shared secret whenever
+one is configured. The admin-session shortcut is gone. The demo panel calls
+`POST /api/admin/jobs` instead.
+
+**Why, and it was found by probing the deployment rather than by reading the
+code.** The route previously accepted an admin session as an alternative to the
+secret whenever `APP_MODE` was not exactly `production`. On a laptop that is
+harmless and convenient. On a public demo URL it is a hole, and a subtle one:
+the demo `AuthProvider` deliberately resolves an unknown visitor to a seeded
+admin, so **"is the caller an admin?" is true for anybody on the internet.** The
+deployed endpoint answered 200 to an unauthenticated POST — a stranger could
+drive the job loop.
+
+The A22 bounds meant they could not have emptied the floor with it. That is not
+a reason to leave it open.
+
+**The general lesson, worth more than the fix:** every authorisation check that
+depends on "who is signed in" is only as strong as the auth adapter behind it,
+and the demo adapter is deliberately permissive. Any endpoint that must be safe
+on a public demo needs something the adapter cannot fabricate — here, a secret.
+
+**The no-secret case stays open deliberately.** `npm run dev` configures
+nothing, and a laptop should not be locked out of its own demo.
+
+**Cost.** The demo panel now goes through a second route. That is arguably
+better anyway: it puts running the jobs on the same footing as every other admin
+action rather than giving it a private front door with different rules.

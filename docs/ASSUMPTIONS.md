@@ -3,6 +3,16 @@
 Everything here was decided by us, not confirmed by CBVA. Each entry names the
 file it affects so it can be found and changed when an answer arrives.
 
+> **Sending this to the client? Send `docs/OPEN-QUESTIONS.md` instead.** It is
+> the same material consolidated, ordered by how much it matters, and written
+> for somebody who has not read the code. This file stays the engineering
+> record — it names files and keeps the derivations.
+
+**Phase 5 status.** A22 is CLOSED (the auto-release job is bounded). A24 is
+PARTLY closed — the eleven desks no longer overlap, but their positions are
+still inferred. A1, A2, A3, A16 and A17 are all still open with the client and
+are now all answerable through the admin screens rather than through code.
+
 **Status key:** 🔴 blocking — the product is wrong until answered · 🟠 material —
 changes numbers or behaviour · 🟡 cosmetic — safe to leave.
 
@@ -446,7 +456,7 @@ behaviour rather than settings values, so changing them is a code change.
 
 ---
 
-### A22 — 🟠 The auto-release job has no blast radius bound, and we have already seen what that costs
+### A22 — ✅ CLOSED in Phase 5 — the auto-release job now has a blast radius bound
 
 **Assumed:** that the clock the job reads is always sane, so an unbounded
 `UPDATE` over every expired booking is safe.
@@ -492,16 +502,29 @@ reach:
 In all three the job is behaving correctly and the *input* is wrong — which is
 exactly the case a bound is for.
 
-**What to build, in Phase 5 or at production hardening:**
+**BUILT IN PHASE 5.** All three, plus the cause:
 
-- **A batch cap.** Refuse to settle more than N rows in one run (N ~ the
-  bookable pool, 93) and log loudly instead. A single run legitimately settling
-  more bookings than the floor has desks is not a real workload.
-- **A horizon.** Ignore bookings whose `ends_at` is more than a few days behind
-  "now". Anything older is a backlog to be settled deliberately, not silently.
-- **A dry run.** `runScheduledJobs({ dryRun: true })` returning the counts it
-  *would* apply, so the cron's effect is inspectable before it is trusted — and
-  so this entry can be verified rather than argued about.
+- **A batch cap**, `settings.auto_release_batch_cap`, default 250. When it
+  trips the transition applies **NOTHING** — not a partial batch. That is the
+  part worth defending: a plain `LIMIT 250` would have settled the 577 rows over
+  three cron ticks instead of one, which is the same catastrophe three minutes
+  slower and indistinguishable from normal operation in the audit log. A bound
+  that only slows a runaway down is not a bound. A trip writes an
+  `auto_release_capped` audit row and surfaces on `/admin/jobs`.
+- **A horizon**, `settings.auto_release_horizon_days`, default 3. Anything older
+  is left alone and COUNTED, so a backlog is visible rather than silently
+  ignored, and cleared deliberately from `/admin/jobs`.
+- **A dry run**, threaded through `runScheduledJobs` → `runAutoRelease` and
+  `materialiseSeries`, exposed at `POST /api/cron/jobs?dryRun=1` and rendered on
+  `/admin/jobs` as "what the next run would do".
+- **The cause, fixed at source.** `demo_offset_seconds` is CHECKed to ±30 days
+  in the database and clamped at `POST /api/clock`, which previously accepted
+  any `z.number().int()`. No downstream bound can fix a bad clock, because from
+  a bad clock's point of view the job is behaving perfectly.
+
+**One thing the bound does NOT fix.** If CBVA moves to hourly slots the
+legitimate volume of a single run quadruples and the default cap becomes wrong —
+see A26.
 
 **Why it is 🟠 and not 🔴.** Nothing built so far is wrong, the live rule is
 correct, and `APP_MODE=production` does not read the demo offset. But the
@@ -542,7 +565,7 @@ than producing a wrong booking or a wrong occupancy figure. Precedent: A15.
 
 ---
 
-### A24 — 🟠 Eleven interpolated desks sit closer together than a desk is wide
+### A24 — 🟡 PARTLY CLOSED in Phase 5 — the eleven no longer overlap, but they are still inferred
 
 **Assumed:** the eleven anchors Phase 2 could not detect — `C1-06`, `C3-08`,
 `C3-09`, `C6-08`, `C6-09`, `C7-04`, `PA-16`, `D1-08`, `D1-09`, `D7-04`, `D8-04`
@@ -595,7 +618,23 @@ A17). Those are questions only CBVA can answer; this is a defect we introduced
 and can fix ourselves — we need somebody who knows the floor for fifteen
 minutes, not a decision.
 
-**How it gets fixed.** `/admin/floor-plan` exists for exactly this (ADR-017):
+**WHAT PHASE 5 DID.** `scripts/fix-interpolated-anchors.mjs` re-places each of
+the eleven by continuing its bay's own axis from the last DETECTED desk in that
+bay, stepping at the drawing's measured pitch (23.02 plan units = 1624 mm, from
+`meta.json`'s scale note), then relaxing a step at a time until clear of every
+desk on the floor — not just its own bay, because C7 runs straight at the PA
+passage. Fifteen colliding pairs to zero, all eleven verified by
+point-in-polygon to still sit inside their declared zone, and
+`tests/unit/floorplan-geometry.test.ts` holds the committed file to it.
+
+**They are still flagged `interpolated`, NOT `manual`, deliberately.** This
+stops them overlapping; it does not make them right. The drawing genuinely does
+not say where these chairs are, and marking them as a human correction would
+claim a confidence nobody has and quietly close a question that is still open.
+The demo risk is gone — no two desks share a pixel and a click resolves
+unambiguously — and the accuracy question remains.
+
+**How it gets closed properly.** `/admin/floor-plan` exists for exactly this (ADR-017):
 drag the eleven, and the export writes them back to `seats.json` marked
 `manual`, surviving `npm run db:reset` and arriving in a reviewable diff. That is
 fifteen minutes with somebody from CBVA who knows the floor, and it is a better
@@ -605,3 +644,106 @@ where these eleven chairs are.
 Deliberately **not** fixed by nudging the geometry in the renderer. A desk drawn
 somewhere it is not is a data problem, and hiding it in one view would leave the
 2D plan, the list view and Phase 5's analytics still wrong.
+
+---
+
+### A25 — 🟠 A no-show that was never released is counted as consuming its whole slot
+
+**Assumed:** a `completed_no_show` booking — somebody claimed a desk, never
+turned up, and the slot ended before the grace window could release it —
+consumed the FULL slot in the seat-hours measure.
+
+**Affects:** `src/lib/analytics/measures.ts` → `seatHoursConsumed`, and every
+seat-hours figure on `/admin/analytics`.
+
+**Why we chose it.** The row sat inside `seat_slot_unique`'s predicate from
+`starts_at` until the job settled it, so nobody else could book that desk for one
+second of that slot. If a no-show were free, the analytics could not answer
+"what do no-shows cost us in desks", which is one of the questions the product
+exists to answer.
+
+**Why it is still an assumption.** It produces an asymmetry that is real but not
+obviously fair: an auto-released no-show costs the grace window (2 hours), and a
+`completed_no_show` costs the whole slot (4 hours) — and the ONLY difference
+between them is whether the grace window happened to expire before the slot
+ended. Somebody who fails to show up for a 30-minute slot is charged 30 minutes;
+somebody who fails to show up for a 4-hour slot is charged 4 hours.
+
+**Mitigated rather than hidden.** `seatHoursIfNoShowWereFree` computes the other
+accounting over the same filters, and the CSV export carries both columns. The
+gap between them is itself reportable — it is the cost of no-shows. CBVA can
+pick without anything being rebuilt.
+
+---
+
+### A26 — 🟠 The auto-release grace window is a constant, and it should probably be a fraction of the slot
+
+**Assumed:** `settings.auto_release_minutes` (120) is independent of slot length.
+
+**Affects:** `src/lib/booking/auto-release.ts`, and — through it — which
+terminal status every no-show lands in.
+
+**The cliff.** At the seeded half-day slots (4 hours) a no-show is released
+after 2 hours and settles as `auto_released`. **If CBVA moves to hourly booking
+— which ADR-020 deliberately makes a settings change — the grace window becomes
+LONGER THAN THE SLOT.** Auto-release then becomes unreachable: by the time the
+window expires the slot is over, and every no-show settles as
+`completed_no_show` instead.
+
+Nothing breaks. No error appears. The feature silently stops existing, every
+no-show starts costing a full slot instead of a partial one (A25), and the
+seat-hours figure jumps for a reason nobody will connect to a settings change
+made weeks earlier.
+
+**What to do about it.** Either express the grace as a fraction of slot length,
+or validate on save that it is meaningfully shorter than the shortest slot. The
+settings screen currently warns in prose; it does not enforce.
+
+`tests/integration/hourly-slots.test.ts` is the natural place to catch this,
+since it already proves the whole lifecycle on a slot key that did not exist
+when the code was written.
+
+---
+
+### A27 — 🟡 Capacity is not sound across a slot-definition change
+
+**Assumed:** that slot definitions do not change mid-period, or that nobody
+looks at a report spanning the change.
+
+**Affects:** `src/lib/analytics/queries.ts` → `capacityByDaySlot`, and any
+utilisation percentage over a range containing a settings edit.
+
+**The mechanism.** `updateSettings()` backfills the derived bounds of LIVE
+bookings only (ADR-021) — terminal rows keep the bounds they were written with,
+correctly, because that is what actually happened. But `capacityByDaySlot`
+computes slot length from the CURRENT definitions. So after a change, historical
+numerators use the old slot length and historical denominators use the new one.
+
+**Why it is 🟡 today.** Slots have never changed, the blast radius is one report,
+and both halves are individually correct — it is only their ratio that is
+mixed. It becomes material the moment CBVA edits a boundary (A4) or moves to
+hourly (A26).
+
+**The fix, when it is needed:** a small `slot_history` table written by
+`updateSettings`, recording the length of each slot key over a date range, and
+joined by the capacity query instead of the live definitions. Until then any
+report spanning a slot change needs an as-of caveat.
+
+---
+
+### A28 — 🟡 The seeded check-in method mix is invented
+
+**Assumed:** roughly 62% of check-ins are by desk QR, 26% by door badge and 12%
+in the app.
+
+**Affects:** `scripts/seed.ts`, and the QR-versus-badge split shown in the
+analytics.
+
+Before Phase 5 `check_in_method` was NULL on every seeded row, which made A19's
+whole argument unqueryable — the distinction between desk-level and floor-level
+evidence existed only as a column comment. The column is now populated so the
+analytics can demonstrate the split, but **the proportions are a guess about
+human behaviour, not a measurement**. The real ratio depends on where the badge
+readers are and whether people habitually scan the sticker in front of them;
+neither is known. The distinction between the two is real; these particular
+numbers are illustrative.

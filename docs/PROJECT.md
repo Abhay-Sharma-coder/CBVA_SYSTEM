@@ -171,14 +171,28 @@ and chairs are instanced primitives carrying booking status. 12 draw calls.
 three and drei are lazily loaded, so `/floor` costs 6 kB more than it did.
 Selecting a desk in 3D selects it in 2D, because it is one value.
 
-**Phase 5 — Admin analytics and deploy**
-⚠️ The headline number — peak observed occupancy against the bookable pool —
-cannot be finalised until **A1** and **A16** close; together they fix its
-denominator. Phases 3 and 4 are not blocked by either.
+**Phase 5 — Admin analytics and deploy** ✅
+The deliverable. Three analytics screens over one measure vocabulary: Today
+(live), Forecast (the next five working days, which CBVA said they have no way
+to see) and Trends (eight weeks, the day-of-week pattern, and a bay heat map
+against each bay's own desk count). **All three candidate occupancy measures
+ship side by side** — seats booked, seats attended, seat-hours consumed —
+because the auto-release accounting question is open and picking for the client
+would put an invented assumption into a board pack. CSV export over the same
+filters.
 
-The actual product: occupancy by day, zone, team and bay; desks held versus
-desks needed; no-show reporting; seat inventory management; the notification
-outbox. Full accessibility pass. Deploy.
+Five admin screens so that answering an open question is typing rather than
+deploying: seat inventory, people, settings, the audit log (written since Phase
+3 and read by nothing until now) and scheduled jobs. Three adoption features
+against the risk that low contention means nobody bothers booking: who's in,
+releasing an allocated desk, and recurring bookings. A22 closed — the
+auto-release job is bounded, and the cap applies nothing when it trips.
+
+⚠️ The headline number is still provisional. **A1** and **A16** together fix its
+denominator, and the screen says so inline rather than presenting a confident
+figure built on a guess.
+
+Deployed at https://cbva-workspace.vercel.app.
 
 ## 9. Open questions
 
