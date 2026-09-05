@@ -6,6 +6,7 @@ import { Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/primitives";
+import { useClock } from "@/components/app-shell/session";
 import { MEASURES, MEASURE_KEYS, type MeasureKey } from "@/lib/analytics/measures";
 
 /**
@@ -54,6 +55,7 @@ export function FilterBar({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const clock = useClock();
 
   const set = React.useCallback(
     (patch: Record<string, string | null>) => {
@@ -69,8 +71,17 @@ export function FilterBar({
 
   const measure = (params.get("measure") as MeasureKey | null) ?? "booked";
 
+  /**
+   * "Today" comes from the shared clock, never the browser's.
+   *
+   * Caught by the eslint rule, and it was a real bug rather than a formality:
+   * with the demo clock advanced two days, a browser-derived range would end
+   * before the data the rest of the screen is showing, and the charts would
+   * quietly lose their most recent points mid-demo.
+   */
   const applyRange = (days: string) => {
-    const to = new Date();
+    const to = clock.data?.now ? new Date(clock.data.now) : null;
+    if (!to) return;
     const from = new Date(to.getTime() - Number(days) * 86_400_000);
     set({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
   };
@@ -79,9 +90,7 @@ export function FilterBar({
     const from = params.get("from");
     const to = params.get("to");
     if (!from || !to) return "56";
-    const days = Math.round(
-      (Date.parse(to) - Date.parse(from)) / 86_400_000,
-    );
+    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
     return RANGES.find((r) => Math.abs(Number(r.key) - days) <= 1)?.key ?? "custom";
   })();
 

@@ -13,7 +13,7 @@ import {
   occupancyByWeekday,
   seatUtilisation,
 } from "@/lib/analytics/queries";
-import { bookableDates } from "@/lib/booking-days";
+import { bookableDates, isWeekend } from "@/lib/booking-days";
 import { schema } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 
@@ -65,7 +65,11 @@ export async function GET(request: Request) {
         view,
         now: now.toISOString(),
         today,
-        isWorkingDay: !holidays.has(today),
+        // Weekends AND holidays. `isWeekend` is the same predicate
+        // bookableDates uses, so "today is not bookable" means exactly what it
+        // means everywhere else — a Saturday reading "the floor is entirely
+        // free" is technically true and completely misleading.
+        isWorkingDay: !holidays.has(today) && !isWeekend(today),
         slots: settings.slotDefinitions,
         filters: f,
         days,
