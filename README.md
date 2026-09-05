@@ -70,6 +70,7 @@ npm run seed             # idempotent; refuses to run with APP_MODE=production
 npm run db:reset         # drop and recreate the public schema (destructive)
 npm run db:backfill-slots
 npm run jobs:run         # auto-release, series, notifications, calendar retry — once
+npm run db:purge-test-data  # remove fixtures an interrupted test run left behind
 
 npm run build:floorplan  # re-read the architect's PDF; outputs are committed
 ```
@@ -77,6 +78,12 @@ npm run build:floorplan  # re-read the architect's PDF; outputs are committed
 > **The e2e suite mutates demo data on purpose** — the walkthrough books,
 > cancels and auto-releases real rows. Run `npm run seed` afterwards to restore
 > a presentable floor.
+>
+> **If you interrupt a test run**, follow it with `npm run db:purge-test-data`.
+> The integration fixtures clean up in `afterAll`, which a killed run never
+> reaches, and the debris is not inert — orphan seats break the "141 desks"
+> assertion, orphan users make the seed report 145 people, and an orphan
+> recurring series keeps queueing failure mail that breaks an unrelated test.
 
 ---
 

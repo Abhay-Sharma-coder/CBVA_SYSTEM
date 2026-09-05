@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "db:backfill-slots": "tsx scripts/backfill-slot-bounds.ts",
-    "jobs:run": "tsx scripts/run-jobs.ts"
+    "jobs:run": "tsx scripts/run-jobs.ts",
+    "db:purge-test-data": "node scripts/purge-test-data.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",
