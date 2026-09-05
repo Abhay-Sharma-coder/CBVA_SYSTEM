@@ -316,6 +316,28 @@ export function renderSeatNotification(
         text: plain(subject, [intro, ...seatLines(c)]),
       };
     }
+
+    case "series_occurrence_failed": {
+      // A recurring booking that could not be made — almost always because
+      // somebody took the desk first. Sent once per occurrence and never
+      // retried, because the day it is about will have passed by the time a
+      // second message would arrive.
+      const subject = "Could not book " + c.seatCode + " for " + dateLong;
+      const intro =
+        "Your recurring booking for " +
+        c.seatCode +
+        " could not be made — the desk was already taken for that slot. " +
+        "The rest of the series is unaffected.";
+      return {
+        subject,
+        html: layout(
+          "A recurring booking could not be made",
+          paragraph(intro) + facts,
+          "Pick another desk from the floor plan for that day. Nothing else in the series has changed.",
+        ),
+        text: plain(subject, [intro, ...seatLines(c)]),
+      };
+    }
   }
 }
 

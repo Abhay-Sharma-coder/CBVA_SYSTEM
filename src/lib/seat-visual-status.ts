@@ -23,6 +23,8 @@ export type BookingDbStatus =
   | "confirmed"
   | "checked_in"
   | "cancelled_by_user"
+  | "cancelled_after_check_in"
+  | "cancelled_by_admin"
   | "auto_released"
   | "completed"
   | "completed_no_show";
@@ -39,6 +41,18 @@ export interface SeatVisualInput extends SeatOccupancy {
   seatStatus: SeatDbStatus;
   /** Who is allocated this desk, when `seatStatus` is 'fixed'. */
   assignedName: string | null;
+  /**
+   * The owner of this allocated desk has handed it back to the pool for the
+   * date and slot on screen.
+   *
+   * ONE BOOLEAN, AND NO EIGHTH STATUS. The seven-status vocabulary is
+   * load-bearing — it is proven desaturated on /styleguide, it is the same
+   * table the 3D view bridges to, and adding to it would mean re-proving the
+   * colour-vision guarantee. A released desk is simply not reserved any more,
+   * so it flows through the existing available / booked / checked_in paths and
+   * countsAsCapacity() picks it up for free.
+   */
+  releasedByOwner?: boolean;
   /** The signed-in user, or null when nobody is. */
   viewerEmail: string | null;
 }
@@ -65,7 +79,10 @@ export function seatVisualStatus(input: SeatVisualInput): SeatVisualStatus {
   const yours =
     held && viewerEmail !== null && occupantEmail !== null && occupantEmail === viewerEmail;
 
-  if (seatStatus === "fixed") {
+  // A released desk is not reserved for the slot on screen, so it falls through
+  // to the ordinary paths below and reads as available, booked or checked in
+  // exactly like any hot desk.
+  if (seatStatus === "fixed" && !input.releasedByOwner) {
     // A fixed desk stays visibly reserved to everyone else even when its owner
     // has checked in; only the owner sees it as theirs.
     return yours ? "your_booking" : "reserved_fixed";
@@ -92,7 +109,9 @@ export function seatOccupantLabel(input: SeatVisualInput): string | null {
   if (input.bookingStatus !== null && HOLDING.has(input.bookingStatus)) {
     return input.occupantName;
   }
-  if (input.seatStatus === "fixed") return input.assignedName;
+  // The same guard, and it is not cosmetic: without it the plan puts an absent
+  // partner's name on a desk a colleague is actually sitting at.
+  if (input.seatStatus === "fixed" && !input.releasedByOwner) return input.assignedName;
   return null;
 }
 

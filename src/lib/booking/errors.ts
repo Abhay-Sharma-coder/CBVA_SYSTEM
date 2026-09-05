@@ -39,7 +39,15 @@ export type BookingErrorCode =
   | "CHECK_IN_WINDOW_CLOSED"
   | "NO_BOOKING_FOR_SEAT"
   | "SEAT_HAS_FUTURE_BOOKINGS"
-  | "USER_NOT_FOUND";
+  | "USER_NOT_FOUND"
+  /* releasing and reclaiming an allocated desk */
+  | "SEAT_NOT_RELEASABLE"
+  | "SEAT_RELEASE_TAKEN"
+  | "RELEASE_NOT_FOUND"
+  | "SEAT_NOT_RELEASED"
+  /* recurring bookings */
+  | "SERIES_NOT_FOUND"
+  | "SERIES_INVALID";
 
 const STATUS: Record<BookingErrorCode, number> = {
   SEAT_TAKEN: 409,
@@ -67,6 +75,12 @@ const STATUS: Record<BookingErrorCode, number> = {
   NO_BOOKING_FOR_SEAT: 404,
   SEAT_HAS_FUTURE_BOOKINGS: 409,
   USER_NOT_FOUND: 404,
+  SEAT_NOT_RELEASABLE: 422,
+  SEAT_RELEASE_TAKEN: 409,
+  RELEASE_NOT_FOUND: 404,
+  SEAT_NOT_RELEASED: 422,
+  SERIES_NOT_FOUND: 404,
+  SERIES_INVALID: 422,
 };
 
 export class BookingError extends Error {
@@ -132,6 +146,21 @@ export function mapPgError(err: unknown): BookingError | null {
     return new BookingError(
       "OCCUPANT_ALREADY_BOOKED",
       "There is already a desk booked for that person in that slot.",
+    );
+  }
+  if (e.code === "23505" && e.constraint === "seat_release_unique") {
+    return new BookingError(
+      "SEAT_RELEASE_TAKEN",
+      "That desk has already been released for that slot.",
+    );
+  }
+  // The tombstone. editBooking() nulls series_id on the rebooked row precisely
+  // so this cannot happen; if it ever does, it is a bug in the write path and
+  // the message says so rather than showing an index name to a partner.
+  if (e.code === "23505" && e.constraint === "booking_series_occurrence_unique") {
+    return new BookingError(
+      "BOOKING_CONFLICT",
+      "That date is already accounted for in the recurring booking.",
     );
   }
   if (e.code === "23P01" && e.constraint === "no_room_overlap") {

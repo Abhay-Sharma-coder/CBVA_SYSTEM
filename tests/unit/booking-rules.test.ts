@@ -146,6 +146,8 @@ const settings = (over: Partial<AppSettings> = {}): AppSettings => ({
   slotDefinitions: [...DEFAULT_SLOT_DEFINITIONS],
   officeHours: { start: "08:00", end: "20:00" },
   demoOffsetSeconds: 0,
+  autoReleaseBatchCap: 250,
+  autoReleaseHorizonDays: 3,
   ...over,
 });
 

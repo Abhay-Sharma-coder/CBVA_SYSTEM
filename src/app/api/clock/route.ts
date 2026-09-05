@@ -20,7 +20,21 @@ export async function GET() {
 }
 
 const bodySchema = z.union([
-  z.object({ action: z.literal("advance"), seconds: z.number().int() }),
+  /**
+   * Bounded to +/- 30 days, matching the settings_demo_offset_bounded CHECK.
+   *
+   * This is the ACTUAL cause of the A22 incident, closed at source. The offset
+   * was an unbounded integer, and one fat-fingered value moves the clock far
+   * enough that every future booking in the database looks expired — at which
+   * point the auto-release job settles the lot while behaving perfectly
+   * correctly. No downstream bound can fix a wrong input; only rejecting the
+   * input can. A single step is capped tighter still, at 7 days, because every
+   * legitimate demo move is hours.
+   */
+  z.object({
+    action: z.literal("advance"),
+    seconds: z.number().int().min(-604_800).max(604_800),
+  }),
   z.object({ action: z.literal("reset") }),
 ]);
 

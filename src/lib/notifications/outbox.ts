@@ -44,6 +44,13 @@ export interface EnqueueInput {
   rendered: RenderedNotification;
   bookingId?: string | null;
   roomBookingId?: string | null;
+  /**
+   * For a message about an occurrence that was never created. The usual
+   * once-only index keys on bookingId, which is null in that case, so 0003 adds
+   * a second one over (kind, series_id, occurrence_date, recipient_email).
+   */
+  seriesId?: string | null;
+  occurrenceDate?: string | null;
 }
 
 /**
@@ -60,6 +67,8 @@ export async function enqueueNotification(db: DbLike, input: EnqueueInput): Prom
     kind: input.kind,
     bookingId: input.bookingId ?? null,
     roomBookingId: input.roomBookingId ?? null,
+    seriesId: input.seriesId ?? null,
+    occurrenceDate: input.occurrenceDate ?? null,
     recipientEmail: input.to,
     subject: input.rendered.subject,
     body: input.rendered.html,

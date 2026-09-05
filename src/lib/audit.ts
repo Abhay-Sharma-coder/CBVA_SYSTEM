@@ -8,7 +8,9 @@
  */
 import { schema, type DbLike } from "@/lib/db";
 
-export type AuditEntity = "bookings" | "room_bookings" | "seats" | "users" | "settings";
+export type AuditEntity = "bookings" | "room_bookings" | "seats" | "users" | "settings"
+  | "seat_releases"
+  | "booking_series";
 
 export type AuditAction =
   | "create"
@@ -25,7 +27,14 @@ export type AuditAction =
   | "activate"
   | "update_settings"
   | "calendar_sync"
-  | "calendar_sync_failed";
+  | "calendar_sync_failed"
+  | "release_seat"
+  | "revoke_release"
+  | "create_series"
+  | "cancel_series"
+  | "materialise"
+  | "auto_release_capped"
+  | "update_user";
 
 export interface AuditEntry {
   actorUserId: string | null;

@@ -53,6 +53,13 @@ export interface AppSettings {
   slotDefinitions: SlotDefinition[];
   officeHours: OfficeHours;
   demoOffsetSeconds: number;
+  /**
+   * Blast-radius bounds on runAutoRelease (A22). Settings-backed because the
+   * legitimate volume of a single run is a function of the bookable pool and
+   * the slots per day, both of which are configuration.
+   */
+  autoReleaseBatchCap: number;
+  autoReleaseHorizonDays: number;
 }
 
 export async function getSettings(database: Db = defaultDb()): Promise<AppSettings> {
@@ -71,6 +78,8 @@ export async function getSettings(database: Db = defaultDb()): Promise<AppSettin
     slotDefinitions: parseSlotDefinitions(row.slotDefinitions),
     officeHours: officeHoursSchema.parse(row.officeHours ?? DEFAULT_OFFICE_HOURS),
     demoOffsetSeconds: row.demoOffsetSeconds,
+    autoReleaseBatchCap: row.autoReleaseBatchCap,
+    autoReleaseHorizonDays: row.autoReleaseHorizonDays,
   };
 }
 

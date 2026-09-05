@@ -29,16 +29,33 @@
  * demo honest. Advancing the demo clock two hours makes the REAL job run the
  * REAL rule against REAL rows and really release the desk.
  *
- * ⚠️ NO BLAST RADIUS BOUND — see ASSUMPTIONS A22. These are unbounded UPDATEs,
- * so the job settles everything the clock says is expired. That is correct when
- * the clock is right and catastrophic when it is not: a test driving it from
- * 2099 settled 577 real bookings in one run during Phase 3. `onlySeatIds` below
- * closed the test hole only. A batch cap, a horizon and a dry run belong here
- * before this is trusted in production.
+ * THE BLAST RADIUS IS NOW BOUNDED — ASSUMPTIONS A22, closed in Phase 5.
+ *
+ * These were unbounded UPDATEs, which is correct when the clock is right and
+ * catastrophic when it is not: a test driving the job from 2099 settled 577
+ * real bookings in one run during Phase 3 and emptied the demo floor. Nothing
+ * complained; it was noticed because the floor plan looked wrong afterwards.
+ *
+ * Three bounds now, and one of them is a deliberate design choice rather than
+ * an obvious one:
+ *
+ * - **A batch cap that applies NOTHING when it trips**, not a partial batch. A
+ *   plain `LIMIT 250` would have settled those 577 rows over three cron ticks
+ *   instead of one — the same catastrophe, three minutes slower, and now
+ *   indistinguishable from normal operation in the audit log. A bound that only
+ *   slows a runaway down is not a bound.
+ * - **A horizon**, so a backlog older than a few days is left for a human
+ *   rather than settled silently. It is counted, not ignored.
+ * - **A dry run**, so the cron's effect is inspectable before it is trusted.
+ *
+ * The cause is bounded too, upstream: `demo_offset_seconds` is CHECKed to ±30
+ * days in the database and clamped at POST /api/clock. No downstream bound can
+ * do that, because from a bad clock's point of view the job is behaving
+ * perfectly.
  */
-import { and, eq, gt, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lte } from "drizzle-orm";
 
-import { writeAuditMany } from "@/lib/audit";
+import { writeAudit, writeAuditMany } from "@/lib/audit";
 import type { Clock } from "@/lib/clock";
 import { schema, type Db } from "@/lib/db";
 import { enqueueNotification } from "@/lib/notifications/outbox";
@@ -56,6 +73,20 @@ export interface AutoReleaseResult {
   /** Nudged halfway through the grace window, before anything was taken away. */
   remindersQueued: number;
   releasedSeatCodes: string[];
+  /**
+   * A transition had more candidates than the cap allows, so it applied
+   * NOTHING. Surfaced on /admin/jobs and in the cron response body, not only in
+   * a log line — a bound nobody sees trip is a job that has quietly stopped.
+   */
+  capTripped: boolean;
+  cappedTransitions: Array<{
+    transition: "release" | "no_show" | "complete";
+    candidates: number;
+    cap: number;
+  }>;
+  /** Older than the horizon and deliberately left alone. Visible, not ignored. */
+  beyondHorizon: number;
+  dryRun: boolean;
 }
 
 export interface AutoReleaseOptions {
@@ -74,13 +105,34 @@ export interface AutoReleaseOptions {
    * Production never sets it.
    */
   onlySeatIds?: string[];
+  /**
+   * Most rows ONE transition may settle in ONE run. Defaults to
+   * `settings.auto_release_batch_cap`.
+   *
+   * A single run legitimately settling more bookings than the floor has desks
+   * is not a real workload — with 93 bookable desks and two slots, a cron that
+   * has been down for a whole day settles at most ~186 in one transition. The
+   * default of 250 clears that with headroom and trips on the 577-row incident.
+   */
+  batchCap?: number;
+  /**
+   * Ignore bookings whose slot ended more than this many days ago. Defaults to
+   * `settings.auto_release_horizon_days`. Anything older is a backlog to be
+   * settled deliberately, not silently.
+   */
+  horizonDays?: number;
+  /** Compute what would change and change nothing. */
+  dryRun?: boolean;
 }
 
 export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoReleaseResult> {
-  const { db, clock } = options;
+  const { db, clock, dryRun = false } = options;
   const now = clock.now();
   const settings = await getSettings(db);
   const graceMs = settings.autoReleaseMinutes * 60_000;
+  const cap = options.batchCap ?? settings.autoReleaseBatchCap;
+  const horizonDays = options.horizonDays ?? settings.autoReleaseHorizonDays;
+  const horizonStart = new Date(now.getTime() - horizonDays * 86_400_000);
   const scope = options.onlySeatIds
     ? inArray(schema.bookings.seatId, options.onlySeatIds)
     : undefined;
@@ -91,7 +143,47 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
     completed: 0,
     remindersQueued: 0,
     releasedSeatCodes: [],
+    capTripped: false,
+    cappedTransitions: [],
+    beyondHorizon: 0,
+    dryRun,
   };
+
+  /**
+   * Select the ids this transition would settle, `cap + 1` of them so an
+   * overflow is detectable in a single round trip.
+   *
+   * Counting first is safe here in a way a "is this seat free?" pre-check is
+   * not, and the difference is worth stating: the cap is a SAFETY VALVE, not a
+   * uniqueness rule. A couple of rows appearing between the count and the
+   * UPDATE changes nothing that matters, whereas a row appearing between a
+   * freeness check and an INSERT is a double booking. The uniqueness argument
+   * still lives entirely in the `eq(status, …)` inside each UPDATE.
+   */
+  async function candidates(where: ReturnType<typeof and>): Promise<string[]> {
+    const rows = await db
+      .select({ id: schema.bookings.id })
+      .from(schema.bookings)
+      .where(where)
+      .orderBy(asc(schema.bookings.startsAt))
+      .limit(cap + 1);
+    return rows.map((r) => r.id);
+  }
+
+  function trips(
+    transition: "release" | "no_show" | "complete",
+    ids: string[],
+  ): boolean {
+    if (ids.length <= cap) return false;
+    result.capTripped = true;
+    result.cappedTransitions.push({ transition, candidates: ids.length, cap });
+    console.error(
+      `[auto-release] ${transition} matched more than ${cap} bookings and was NOT applied. ` +
+        `This is the A22 bound. Check the clock (demo offset ${settings.demoOffsetSeconds}s) ` +
+        `before raising the cap.`,
+    );
+    return true;
+  }
 
   /* --------------------------------------------------------------- remind
    *
@@ -108,7 +200,9 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
    * unique index on (kind, booking_id, recipient_email), so a job running every
    * sixty seconds across that window sends exactly one.
    */
-  result.remindersQueued = await queueReminders(db, now, graceMs, scope, settings.slotDefinitions);
+  result.remindersQueued = await queueReminders(
+    db, now, graceMs, scope, settings.slotDefinitions, dryRun,
+  );
 
   /* ---------------------------------------------------------------- release
    *
@@ -117,18 +211,34 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
    * that already finished would be theatre — there is no remaining time for
    * anybody to use it — so that case is handled separately below.
    */
-  const released = await db
-    .update(schema.bookings)
-    .set({ status: "auto_released", releasedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(schema.bookings.status, "confirmed"),
-        lte(schema.bookings.startsAt, new Date(now.getTime() - graceMs)),
-        gt(schema.bookings.endsAt, now),
-        scope,
-      ),
-    )
-    .returning();
+  const releaseWhere = and(
+    eq(schema.bookings.status, "confirmed"),
+    lte(schema.bookings.startsAt, new Date(now.getTime() - graceMs)),
+    // NOTE: the horizon is deliberately NOT applied to this transition. Its
+    // predicate already carries `ends_at > now`, so every candidate is by
+    // definition a slot still running — nothing here can be older than the
+    // horizon. Adding the clause would be dead code that looks load-bearing.
+    gt(schema.bookings.endsAt, now),
+    scope,
+  );
+  const releaseIds = await candidates(releaseWhere);
+
+  const released =
+    trips("release", releaseIds) || dryRun || releaseIds.length === 0
+      ? []
+      : await db
+          .update(schema.bookings)
+          .set({ status: "auto_released", releasedAt: now, updatedAt: now })
+          .where(
+            and(
+              inArray(schema.bookings.id, releaseIds),
+              // Load-bearing, and it must survive any future refactor: this is
+              // what makes a concurrent second runner a no-op rather than a
+              // double release. ADR-027.
+              eq(schema.bookings.status, "confirmed"),
+            ),
+          )
+          .returning();
 
   /* --------------------------------------------------------------- no-show
    *
@@ -137,11 +247,27 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
    * no-show, which is the row analytics counts against the person's attendance
    * rather than against the desk's availability.
    */
-  const noShow = await db
-    .update(schema.bookings)
-    .set({ status: "completed_no_show", releasedAt: now, updatedAt: now })
-    .where(and(eq(schema.bookings.status, "confirmed"), lte(schema.bookings.endsAt, now), scope))
-    .returning({ id: schema.bookings.id, seatId: schema.bookings.seatId });
+  const noShowIds = await candidates(
+    and(
+      eq(schema.bookings.status, "confirmed"),
+      lte(schema.bookings.endsAt, now),
+      gte(schema.bookings.endsAt, horizonStart),
+      scope,
+    ),
+  );
+  const noShow =
+    trips("no_show", noShowIds) || dryRun || noShowIds.length === 0
+      ? []
+      : await db
+          .update(schema.bookings)
+          .set({ status: "completed_no_show", releasedAt: now, updatedAt: now })
+          .where(
+            and(
+              inArray(schema.bookings.id, noShowIds),
+              eq(schema.bookings.status, "confirmed"),
+            ),
+          )
+          .returning({ id: schema.bookings.id, seatId: schema.bookings.seatId });
 
   /* -------------------------------------------------------------- complete
    *
@@ -150,15 +276,63 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
    * last Tuesday as still occupied. `completed` is the terminal state that says
    * "this desk was genuinely used".
    */
-  const completed = await db
-    .update(schema.bookings)
-    .set({ status: "completed", updatedAt: now })
-    .where(and(eq(schema.bookings.status, "checked_in"), lte(schema.bookings.endsAt, now), scope))
-    .returning({ id: schema.bookings.id });
+  const completedIds = await candidates(
+    and(
+      eq(schema.bookings.status, "checked_in"),
+      lte(schema.bookings.endsAt, now),
+      gte(schema.bookings.endsAt, horizonStart),
+      scope,
+    ),
+  );
+  const completed =
+    trips("complete", completedIds) || dryRun || completedIds.length === 0
+      ? []
+      : await db
+          .update(schema.bookings)
+          .set({ status: "completed", updatedAt: now })
+          .where(
+            and(
+              inArray(schema.bookings.id, completedIds),
+              eq(schema.bookings.status, "checked_in"),
+            ),
+          )
+          .returning({ id: schema.bookings.id });
+
+  /* -------------------------------------------------------------- horizon
+   *
+   * What was left alone because it is older than the horizon. Counted rather
+   * than ignored: a backlog nobody can see is a backlog nobody clears, and
+   * these rows are unsettled attendance history — exactly the data the product
+   * is selling.
+   */
+  result.beyondHorizon = await countBeyondHorizon(db, now, horizonStart, scope);
 
   result.released = released.length;
   result.markedNoShow = noShow.length;
   result.completed = completed.length;
+
+  if (dryRun) {
+    // Report what WOULD have happened, having changed nothing.
+    result.released = result.capTripped ? 0 : releaseIds.length;
+    result.markedNoShow = result.capTripped ? 0 : noShowIds.length;
+    result.completed = result.capTripped ? 0 : completedIds.length;
+    return result;
+  }
+
+  if (result.capTripped) {
+    await writeAudit(db, {
+      actorUserId: null,
+      entity: "bookings",
+      entityId: null,
+      action: "auto_release_capped",
+      after: {
+        cap,
+        transitions: result.cappedTransitions,
+        demoOffsetSeconds: settings.demoOffsetSeconds,
+        now: now.toISOString(),
+      },
+    });
+  }
 
   if (released.length > 0) {
     await notifyReleased(db, released, settings.slotDefinitions);
@@ -194,6 +368,32 @@ export async function runAutoRelease(options: AutoReleaseOptions): Promise<AutoR
   await writeAuditMany(db, auditRows);
 
   return result;
+}
+
+/**
+ * Bookings the horizon excluded: still `confirmed` or `checked_in`, with a slot
+ * that ended before the horizon. A non-zero number here means somebody needs to
+ * settle a backlog deliberately, through POST /api/admin/jobs/settle.
+ */
+async function countBeyondHorizon(
+  db: Db,
+  now: Date,
+  horizonStart: Date,
+  scope: ReturnType<typeof inArray> | undefined,
+): Promise<number> {
+  const rows = await db
+    .select({ id: schema.bookings.id })
+    .from(schema.bookings)
+    .where(
+      and(
+        inArray(schema.bookings.status, ["confirmed", "checked_in"]),
+        lte(schema.bookings.endsAt, now),
+        lte(schema.bookings.endsAt, horizonStart),
+        scope,
+      ),
+    )
+    .limit(1000);
+  return rows.length;
 }
 
 async function seatCodesFor(db: Db, seatIds: string[]): Promise<string[]> {
@@ -306,6 +506,7 @@ async function queueReminders(
   graceMs: number,
   scope: ReturnType<typeof inArray> | undefined,
   slotDefinitions: readonly SlotDefinition[],
+  dryRun: boolean,
 ): Promise<number> {
   const rows = await db
     .select({
@@ -334,6 +535,10 @@ async function queueReminders(
       ),
     )
     .limit(200);
+
+  // A dry run counts the nudges it would send and sends none. Enqueuing them
+  // would be a write, and the whole point of the mode is that it is not one.
+  if (dryRun) return rows.length;
 
   for (const row of rows) {
     const slot = slotDefinitions.find((d) => d.key === row.slot) ?? {

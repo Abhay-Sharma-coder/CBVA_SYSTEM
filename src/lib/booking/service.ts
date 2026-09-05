@@ -32,6 +32,7 @@ import {
   checkInOpensAt,
   requireSlot,
 } from "@/lib/booking/rules";
+import { hasReleasedOwnSeat, liveReleasesFor } from "@/lib/booking/seat-release";
 import type { Clock } from "@/lib/clock";
 import { schema, type Db, type DbLike } from "@/lib/db";
 import type { Booking, Seat, User } from "@/lib/db/schema";
@@ -183,6 +184,67 @@ function notifyContext(a: NotifyArgs) {
   };
 }
 
+/* ------------------------------------------------- booking a released desk */
+
+interface ReleaseInsert {
+  release: { id: string };
+  seat: Seat;
+  bookingDate: string;
+  slot: string;
+  startsAt: Date;
+  endsAt: Date;
+  bookedByUserId: string;
+  occupantUserId: string;
+  source: "self" | "admin" | "on_behalf";
+  seriesId: string | null;
+  now: Date;
+}
+
+/**
+ * INSERT a booking that only exists because a fixed desk was released, taking
+ * the release under a row lock in the SAME statement.
+ *
+ * The alternative — SELECT the release, check it is live, then INSERT — has a
+ * window in which the owner can reclaim the desk, and the booking would land on
+ * a desk that is no longer available. `FOR UPDATE` inside the CTE means the
+ * revoke path (a conditional UPDATE on the same row) blocks until this commits
+ * and then re-evaluates, so the two orderings are the only two outcomes and
+ * neither is wrong.
+ *
+ * Zero rows back means the release was revoked first. That is an ordinary
+ * outcome, phrased for a person, exactly like `23505` is.
+ */
+async function insertAgainstRelease(tx: DbLike, args: ReleaseInsert): Promise<[Booking]> {
+  const rows = await (tx as Db).execute(sql`
+    with r as (
+      select id from seat_releases
+       where id = ${args.release.id}
+         and revoked_at is null
+       for update
+    )
+    insert into bookings (
+      seat_id, booking_date, slot, starts_at, ends_at,
+      booked_by_user_id, occupant_user_id, status, source,
+      release_id, series_id, created_at, updated_at)
+    select
+      ${args.seat.id}::uuid, ${args.bookingDate}::date, ${args.slot},
+      ${args.startsAt}::timestamptz, ${args.endsAt}::timestamptz,
+      ${args.bookedByUserId}::uuid, ${args.occupantUserId}::uuid,
+      'confirmed'::booking_status, ${args.source}::booking_source,
+      r.id, ${args.seriesId}::uuid, ${args.now}::timestamptz, ${args.now}::timestamptz
+    from r
+    returning *`);
+
+  const booking = rows.rows[0] as unknown as Booking | undefined;
+  if (!booking) {
+    throw new BookingError(
+      "SEAT_NOT_BOOKABLE",
+      `${args.seat.seatCode} was taken back by the colleague it is allocated to a moment ago. Please pick another desk.`,
+    );
+  }
+  return [booking];
+}
+
 /* ------------------------------------------------------------------ create */
 
 export interface CreateBookingInput {
@@ -191,6 +253,18 @@ export interface CreateBookingInput {
   slot: string;
   /** Omit to book for yourself. */
   occupantUserId?: string;
+  /**
+   * Set by the recurring-booking materialiser, which reuses this function
+   * rather than reimplementing it — so the window check, the slot check,
+   * authorisation, the audit row and mapPgError all stay in exactly one place.
+   */
+  seriesId?: string;
+  /**
+   * The series was confirmed once, when it was created. A per-occurrence email
+   * every time the booking window rolls forward would be spam, and the surest
+   * way to get the whole product filtered into a folder nobody reads.
+   */
+  suppressNotifications?: boolean;
 }
 
 export interface BookingResult {
@@ -214,7 +288,18 @@ export async function createBooking(
   assertDateBookable(input.bookingDate, now, settings, holidays);
 
   const seatRow = await seatByCode(ctx.db, input.seatCode);
-  assertSeatBookable(seatRow?.seat);
+
+  // A fixed desk whose owner released it for exactly this date and slot IS
+  // bookable. Read here only to produce a good error message — the INSERT below
+  // re-selects the release under a row lock, so this read never authorises the
+  // write. See seat-release.ts.
+  const releases =
+    seatRow?.seat.status === "fixed"
+      ? await liveReleasesFor(ctx.db, input.bookingDate, slot.key)
+      : null;
+  const release = releases?.get(seatRow!.seat.id) ?? null;
+
+  assertSeatBookable(seatRow?.seat, release);
   const seat: Seat = seatRow!.seat;
   const zone = seatRow!.zoneCode;
 
@@ -225,7 +310,16 @@ export async function createBooking(
   if (!occupant) {
     throw new BookingError("USER_NOT_FOUND", "That colleague is not on the staff list.");
   }
-  assertMayBookFor(ctx.actor, occupant);
+  // Somebody who gave up their own allocated desk for this slot may take a hot
+  // one. Without it, releasing your desk in the morning and then changing your
+  // mind leaves you with nowhere to sit and no way to book.
+  const releasedOwnSeat = await hasReleasedOwnSeat(
+    ctx.db,
+    occupant.id,
+    input.bookingDate,
+    slot.key,
+  );
+  assertMayBookFor(ctx.actor, occupant, { hasReleasedOwnSeat: releasedOwnSeat });
 
   const { startsAt, endsAt } = deriveSlotBounds(
     input.bookingDate,
@@ -254,27 +348,54 @@ export async function createBooking(
     );
   }
 
+  const source: "self" | "admin" | "on_behalf" =
+    occupant.id === ctx.actor.id ? "self" : ctx.actor.isAdmin ? "admin" : "on_behalf";
+
   try {
     return await ctx.db.transaction(async (tx) => {
-      const [booking] = await tx
-        .insert(schema.bookings)
-        .values({
-          seatId: seat.id,
-          bookingDate: input.bookingDate,
-          slot: slot.key,
-          startsAt,
-          endsAt,
-          bookedByUserId: ctx.actor.id,
-          occupantUserId: occupant.id,
-          status: "confirmed",
-          source: occupant.id === ctx.actor.id ? "self" : ctx.actor.isAdmin ? "admin" : "on_behalf",
-          // Always written explicitly rather than left to DEFAULT now(): the
-          // optimistic lock compares this value after a JSON round trip, and a
-          // Postgres default carries microseconds a JS Date cannot hold.
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      /**
+       * On a released fixed desk the INSERT re-selects the release FOR UPDATE
+       * in the same statement, so there is no window between finding the desk
+       * free to take and taking it. Zero rows inserted means the owner
+       * reclaimed it while this request was in flight — an ordinary outcome
+       * with a sentence attached, not a 500. Reading first and then inserting
+       * would reintroduce exactly the race ADR-003 exists to close.
+       */
+      const [booking] = release
+        ? await insertAgainstRelease(tx, {
+            release,
+            seat,
+            bookingDate: input.bookingDate,
+            slot: slot.key,
+            startsAt,
+            endsAt,
+            bookedByUserId: ctx.actor.id,
+            occupantUserId: occupant.id,
+            source,
+            seriesId: input.seriesId ?? null,
+            now,
+          })
+        : await tx
+            .insert(schema.bookings)
+            .values({
+              seatId: seat.id,
+              bookingDate: input.bookingDate,
+              slot: slot.key,
+              startsAt,
+              endsAt,
+              bookedByUserId: ctx.actor.id,
+              occupantUserId: occupant.id,
+              status: "confirmed",
+              source,
+              seriesId: input.seriesId ?? null,
+              // Always written explicitly rather than left to DEFAULT now():
+              // the optimistic lock compares this value after a JSON round
+              // trip, and a Postgres default carries microseconds a JS Date
+              // cannot hold.
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
 
       const args: NotifyArgs = {
         seatCode: seat.seatCode,
@@ -287,16 +408,18 @@ export async function createBooking(
         bookingId: booking!.id,
       };
 
-      await enqueueNotification(tx, {
-        kind: "booking_confirmed",
-        to: ctx.actor.email,
-        bookingId: booking!.id,
-        rendered: renderSeatNotification("booking_confirmed", notifyContext(args)),
-      });
+      if (!input.suppressNotifications) {
+        await enqueueNotification(tx, {
+          kind: "booking_confirmed",
+          to: ctx.actor.email,
+          bookingId: booking!.id,
+          rendered: renderSeatNotification("booking_confirmed", notifyContext(args)),
+        });
+      }
 
       // The colleague gets their own message. Being given a desk without being
       // told is how a booking becomes a no-show.
-      if (occupant.id !== ctx.actor.id) {
+      if (occupant.id !== ctx.actor.id && !input.suppressNotifications) {
         await enqueueNotification(tx, {
           kind: "booked_on_your_behalf",
           to: occupant.email,
@@ -419,7 +542,16 @@ export async function editBooking(
   assertDateBookable(input.bookingDate, now, settings, holidays);
 
   const seatRow = await seatByCode(ctx.db, input.seatCode);
-  assertSeatBookable(seatRow?.seat);
+  // The destination desk gets the same treatment as a fresh booking: a fixed
+  // desk released for that date and slot is a legal target. This is the second
+  // assertSeatBookable call site and is easy to miss.
+  const editReleases =
+    seatRow?.seat.status === "fixed"
+      ? await liveReleasesFor(ctx.db, input.bookingDate, slot.key)
+      : null;
+  const editRelease = editReleases?.get(seatRow!.seat.id) ?? null;
+
+  assertSeatBookable(seatRow?.seat, editRelease);
   const seat = seatRow!.seat;
   const zone = seatRow!.zoneCode;
 
@@ -487,22 +619,54 @@ export async function editBooking(
         throw staleBookingError(now_?.status ?? "cancelled_by_user");
       }
 
-      const [booking] = await tx
-        .insert(schema.bookings)
-        .values({
-          seatId: seat.id,
-          bookingDate: input.bookingDate,
-          slot: slot.key,
-          startsAt,
-          endsAt,
-          bookedByUserId: existing.booking.bookedByUserId,
-          occupantUserId: existing.booking.occupantUserId,
-          status: "confirmed",
-          source: existing.booking.source,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      /**
+       * `seriesId` is deliberately NOT carried over, and `releaseId` is not
+       * either.
+       *
+       * An edited occurrence has detached from its series by definition — it is
+       * no longer what the series says. Two things follow, and both matter:
+       * the cancelled row above keeps its `seriesId` and so remains the
+       * tombstone that stops the materialiser recreating this date, and the new
+       * row must NOT carry the same id or it would collide with that tombstone
+       * on `booking_series_occurrence_unique`. Miss this and every edit of a
+       * recurring booking throws a raw index name at the user.
+       *
+       * The release link is dropped for the analogous reason: if the edit moved
+       * the booking to a different desk or day, the old release no longer has
+       * anything to do with it. Moving ONTO a released desk goes through
+       * `createBooking`, which takes its own release under a lock.
+       */
+      const [booking] = editRelease
+        ? await insertAgainstRelease(tx, {
+            release: editRelease,
+            seat,
+            bookingDate: input.bookingDate,
+            slot: slot.key,
+            startsAt,
+            endsAt,
+            bookedByUserId: existing.booking.bookedByUserId,
+            occupantUserId: existing.booking.occupantUserId,
+            source: existing.booking.source,
+            seriesId: null,
+            now,
+          })
+        : await tx
+            .insert(schema.bookings)
+            .values({
+              seatId: seat.id,
+              bookingDate: input.bookingDate,
+              slot: slot.key,
+              startsAt,
+              endsAt,
+              bookedByUserId: existing.booking.bookedByUserId,
+              occupantUserId: existing.booking.occupantUserId,
+              status: "confirmed",
+              source: existing.booking.source,
+              seriesId: null,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
 
       const args: NotifyArgs = {
         seatCode: seat.seatCode,

@@ -40,13 +40,33 @@ export function canBookOnBehalf(actor: User): boolean {
  * every occupancy number is wrong by one. The analytics is the product, so this
  * is enforced rather than trusted.
  */
-export function assertOccupantMayBook(occupant: User, bookingForSelf: boolean): void {
+export interface OccupantContext {
+  /**
+   * This person has handed their own allocated desk back to the pool for the
+   * date and slot being booked.
+   *
+   * Without this carve-out there is a hole with a straight face: a partner
+   * releases their desk for the morning, changes their mind, and now has
+   * nowhere to sit and no way to book one. Keyed on a `seat_releases` ROW, not
+   * on grade, so the general rule that fixed grades do not consume hot desks is
+   * not weakened — and the arithmetic stays right, because their released desk
+   * added one to capacity and their new booking adds one to demand.
+   */
+  hasReleasedOwnSeat?: boolean;
+}
+
+export function assertOccupantMayBook(
+  occupant: User,
+  bookingForSelf: boolean,
+  context: OccupantContext = {},
+): void {
   if (!occupant.isActive) {
     throw new BookingError(
       "OCCUPANT_INACTIVE",
       `${occupant.displayName}'s account is no longer active, so a desk cannot be booked for them.`,
     );
   }
+  if (context.hasReleasedOwnSeat) return;
   if (occupant.seatMode !== "bookable" || FIXED_GRADES.has(occupant.grade)) {
     throw new BookingError(
       bookingForSelf ? "NOT_BOOKABLE_GRADE" : "OCCUPANT_NOT_BOOKABLE",
@@ -57,7 +77,11 @@ export function assertOccupantMayBook(occupant: User, bookingForSelf: boolean): 
   }
 }
 
-export function assertMayBookFor(actor: User, occupant: User): void {
+export function assertMayBookFor(
+  actor: User,
+  occupant: User,
+  context: OccupantContext = {},
+): void {
   const forSelf = actor.id === occupant.id;
   if (!forSelf && !canBookOnBehalf(actor)) {
     throw new BookingError(
@@ -65,13 +89,25 @@ export function assertMayBookFor(actor: User, occupant: User): void {
       "Booking for a colleague is available to managers and above, and to admin staff.",
     );
   }
-  assertOccupantMayBook(occupant, forSelf);
+  assertOccupantMayBook(occupant, forSelf, context);
 }
 
-export function assertSeatBookable(seat: Seat | undefined): asserts seat is Seat {
+/**
+ * @param release  A live, unrevoked `seat_releases` row for the exact date and
+ *   slot being booked, when the caller found one. A fixed desk whose owner has
+ *   released it IS bookable for that slot and for nobody else's.
+ *
+ *   This is a rule about the DESK. The separate rule about which PEOPLE may
+ *   occupy a hot desk lives in assertOccupantMayBook and is untouched by it.
+ */
+export function assertSeatBookable(
+  seat: Seat | undefined,
+  release?: { id: string } | null,
+): asserts seat is Seat {
   if (!seat) {
     throw new BookingError("SEAT_NOT_FOUND", "That desk is not on the floor plan.");
   }
+  if (seat.status === "fixed" && release) return;
   if (seat.status !== "bookable") {
     const why: Record<string, string> = {
       fixed: `${seat.seatCode} is allocated to somebody, so it cannot be booked.`,
@@ -87,6 +123,28 @@ export function assertSeatBookable(seat: Seat | undefined): asserts seat is Seat
  * made it, or an admin. A manager who booked for their team keeps the ability
  * to unbook it.
  */
+/**
+ * Who may hand a fixed desk back to the pool: the person it is allocated to, or
+ * an admin doing it on their behalf. Not the person's manager — an allocated
+ * desk is theirs, and somebody else giving it away is a surprise nobody wants
+ * on a Monday morning.
+ */
+export function assertMayReleaseSeat(actor: User, seat: Seat): void {
+  if (seat.status !== "fixed") {
+    throw new BookingError(
+      "SEAT_NOT_RELEASABLE",
+      `${seat.seatCode} is not an allocated desk, so there is nothing to release.`,
+    );
+  }
+  if (actor.isAdmin) return;
+  if (seat.assignedUserId !== actor.id) {
+    throw new BookingError(
+      "FORBIDDEN",
+      `${seat.seatCode} is not your desk to release.`,
+    );
+  }
+}
+
 export function assertMayMutateBooking(
   actor: User,
   booking: { occupantUserId: string; bookedByUserId: string },

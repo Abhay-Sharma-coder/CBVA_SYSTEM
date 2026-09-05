@@ -7,6 +7,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -107,6 +108,14 @@ export const users = pgTable(
     fixedSeatId: uuid("fixed_seat_id"),
     isAdmin: boolean("is_admin").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * Opt-out of the coworker roster. Defaults true, because a "who is in on
+     * Tuesday" view that nobody has opted into is an empty screen that argues
+     * for nothing — and countering low booking uptake is the whole reason it
+     * exists. Opting out hides the NAME, never the desk, so occupancy data is
+     * unaffected by the privacy choice.
+     */
+    shareAttendance: boolean("share_attendance").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -214,6 +223,20 @@ export const bookings = pgTable(
     releasedAt: timestamp("released_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     cancelledByUserId: uuid("cancelled_by_user_id"),
+    /**
+     * Set when this booking only exists because a fixed desk's owner released
+     * it for this date and slot. Analytics reads it to answer "how much demand
+     * did released desks absorb"; the revoke path reads it to refuse to reclaim
+     * a desk somebody is sitting at. FK added in 0003.
+     */
+    releaseId: uuid("release_id"),
+    /**
+     * The recurring series that materialised this row, if any. A cancelled row
+     * KEEPS its seriesId — it is the tombstone that stops the job recreating a
+     * deliberately cancelled occurrence. editBooking() must therefore null this
+     * on the rebooked row; see booking_series_occurrence_unique in 0003.
+     */
+    seriesId: uuid("series_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -322,6 +345,13 @@ export const notificationLog = pgTable(
     /** Retry backoff. Null means "eligible now". */
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     error: text("error"),
+    /**
+     * A message about an occurrence that was NEVER created — the materialiser
+     * lost the seat. notification_log_job_kind_once keys on bookingId, which is
+     * null here, so 0003 adds a second once-only key over these two.
+     */
+    seriesId: uuid("series_id"),
+    occurrenceDate: date("occurrence_date"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -374,7 +404,105 @@ export const settings = pgTable("settings", {
    * agree and the offset survives a page refresh — see src/lib/clock.ts.
    */
   demoOffsetSeconds: integer("demo_offset_seconds").notNull().default(0),
+  /**
+   * Blast-radius bounds for runAutoRelease (ASSUMPTIONS A22). Settings-backed
+   * rather than constants because the right cap is a function of the bookable
+   * pool and the slots per day, and both of those are configuration: at hourly
+   * slots the legitimate daily volume is four times what it is at half-days.
+   */
+  autoReleaseBatchCap: integer("auto_release_batch_cap").notNull().default(250),
+  autoReleaseHorizonDays: integer("auto_release_horizon_days")
+    .notNull()
+    .default(3),
 });
+
+/**
+ * A fixed desk, handed back to the pool for one date and one slot.
+ *
+ * 47 of the 141 desks are allocated and therefore never appear in the occupancy
+ * data — they are a constant, not a measurement. This table is the only route
+ * by which they ever get measured.
+ *
+ * Revoking sets revoked_at rather than deleting, and seat_release_unique is
+ * partial on that column: a desk released and later reclaimed is a fact about
+ * how the floor was used, and the history is the analytics.
+ */
+export const seatReleases = pgTable(
+  "seat_releases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    seatId: uuid("seat_id")
+      .notNull()
+      .references(() => seats.id, { onDelete: "restrict" }),
+    releaseDate: date("release_date").notNull(),
+    slot: text("slot").notNull(),
+    /** Derived by deriveSlotBounds() and nowhere else, like bookings. */
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    releasedByUserId: uuid("released_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    note: text("note"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedByUserId: uuid("revoked_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // seat_release_unique is PARTIAL on revoked_at and lives in 0003; drizzle
+  // cannot express the predicate. Do not add an app-level pre-check for it.
+  (t) => [
+    index("seat_releases_date_slot_idx").on(t.releaseDate, t.slot),
+    index("seat_releases_owner_idx").on(t.ownerUserId, t.releaseDate),
+  ],
+);
+
+/**
+ * A recurring booking: same seat, same slot, same weekdays, materialised into
+ * real `bookings` rows by the job as the booking window rolls forward.
+ *
+ * There is deliberately no exceptions table. Cancelling one occurrence leaves a
+ * cancelled booking row carrying (seriesId, bookingDate, slot), and
+ * booking_series_occurrence_unique is NOT partial on status — so that row is
+ * the tombstone the materialiser conflicts with. See 0003.
+ */
+export const bookingSeries = pgTable(
+  "booking_series",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    occupantUserId: uuid("occupant_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    seatId: uuid("seat_id")
+      .notNull()
+      .references(() => seats.id, { onDelete: "restrict" }),
+    slot: text("slot").notNull(),
+    /** ISO weekdays, 1 = Monday to 7 = Sunday — the same numbering as isodow. */
+    weekdays: smallint("weekdays").array().notNull(),
+    startsOn: date("starts_on").notNull(),
+    endsOn: date("ends_on"),
+    /** 'active' | 'paused' | 'ended', checked in 0003. */
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("booking_series_occupant_idx").on(t.occupantUserId)],
+);
 
 export const auditLog = pgTable(
   "audit_log",
@@ -411,6 +539,12 @@ export type Holiday = typeof holidays.$inferSelect;
 export type NotificationLog = typeof notificationLog.$inferSelect;
 export type NewNotificationLog = typeof notificationLog.$inferInsert;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type SeatRelease = typeof seatReleases.$inferSelect;
+export type NewSeatRelease = typeof seatReleases.$inferInsert;
+export type BookingSeries = typeof bookingSeries.$inferSelect;
+export type NewBookingSeries = typeof bookingSeries.$inferInsert;
+/** booking_series.status — 'active' | 'paused' | 'ended'. */
+export type SeriesStatus = "active" | "paused" | "ended";
 export type Grade = (typeof gradeEnum.enumValues)[number];
 /** A key into settings.slot_definitions, not a closed set. See ADR-020. */
 export type Slot = string;

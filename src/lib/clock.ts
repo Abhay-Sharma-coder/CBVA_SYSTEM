@@ -73,6 +73,13 @@ export async function readDemoOffsetSeconds(): Promise<number> {
 }
 
 /**
+ * 30 days, matching the settings_demo_offset_bounded CHECK in 0003. Anything
+ * past this is not a demo, it is a clock fault — and a clock fault is what let
+ * the auto-release job settle 577 bookings in one run during Phase 3.
+ */
+export const MAX_DEMO_OFFSET_SECONDS = 2_592_000;
+
+/**
  * Shifts the shared demo clock. Used by the demo control in the app shell and,
  * from Phase 3, by the auto-release demonstration.
  */
@@ -80,7 +87,21 @@ export async function advanceDemoClock(bySeconds: number): Promise<number> {
   const { db, schema } = await import("@/lib/db");
   const [row] = await db().select().from(schema.settings).limit(1);
   if (!row) throw new Error("settings row missing — run `npm run seed`");
-  const next = row.demoOffsetSeconds + bySeconds;
+  /**
+   * Clamped, not just CHECKed.
+   *
+   * The database CHECK would reject an accumulated offset past 30 days with a
+   * 23514 — correct, but it surfaces as a failed demo control in front of an
+   * audience. Clamping means repeatedly pressing "+2 hours" walks up to the
+   * ceiling and stops there, which is the behaviour somebody driving a demo
+   * expects. The bound itself is what matters: past it, every future booking
+   * looks expired and the auto-release job settles the whole database while
+   * behaving perfectly correctly. See ASSUMPTIONS A22.
+   */
+  const next = Math.max(
+    -MAX_DEMO_OFFSET_SECONDS,
+    Math.min(MAX_DEMO_OFFSET_SECONDS, row.demoOffsetSeconds + bySeconds),
+  );
   await db()
     .update(schema.settings)
     .set({ demoOffsetSeconds: next })

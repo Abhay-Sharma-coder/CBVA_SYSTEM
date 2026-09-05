@@ -1,5 +1,5 @@
 /**
- * The eight things this product tells people about.
+ * The nine things this product tells people about.
  *
  * `notification_log.kind` is plain text in the schema, so this union is the
  * only thing keeping the vocabulary closed. Adding a kind means adding a
@@ -15,6 +15,7 @@ export const NOTIFICATION_KINDS = [
   "reminder",
   "room_confirmed",
   "room_cancelled",
+  "series_occurrence_failed",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -27,6 +28,10 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const JOB_EMITTED_KINDS: ReadonlySet<NotificationKind> = new Set([
   "auto_released",
   "reminder",
+  // This one is keyed differently — on (kind, series_id, occurrence_date,
+  // recipient_email) — because the booking it is about was never created, so
+  // booking_id is null and the usual index cannot see it. See 0003.
+  "series_occurrence_failed",
 ]);
 
 export const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
@@ -38,4 +43,5 @@ export const NOTIFICATION_LABELS: Record<NotificationKind, string> = {
   reminder: "Check-in reminder",
   room_confirmed: "Room booked",
   room_cancelled: "Room booking cancelled",
+  series_occurrence_failed: "Recurring booking could not be made",
 };
