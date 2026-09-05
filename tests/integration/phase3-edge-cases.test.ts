@@ -775,6 +775,24 @@ describe("16 — the calendar is down", () => {
 describe("17 — the mail server is down", () => {
   it("keeps the booking, counts the attempt, and sends on retry", async () => {
     const clock = freshClock();
+
+    /**
+     * Drain the outbox first, so the dispatch counts below are about THIS
+     * message.
+     *
+     * dispatchNotifications is global by design — it is the real job, and the
+     * job has no business knowing which test queued what. That was harmless
+     * while bookings were the only thing that queued mail; Phase 5 added a
+     * recurring-booking materialiser that emails a failure per unbookable
+     * occurrence, and a suite run can leave dozens of those in the shared
+     * database. `expect(failed.failed).toBe(1)` then reads 32 and the failure
+     * looks like a mail bug rather than a housekeeping one.
+     *
+     * Draining rather than relaxing the assertion, because "exactly one message
+     * failed" is the thing worth asserting.
+     */
+    await dispatchNotifications({ db, clock, mailer: workingMailer(), limit: 500 });
+
     const booked = await createBooking(ctx(f.article, clock), {
       seatCode: f.seatA.code,
       bookingDate: MONDAY,

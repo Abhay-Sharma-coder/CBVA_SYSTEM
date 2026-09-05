@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import {
   AM,
@@ -11,6 +11,9 @@ import {
   testDb,
   testPool,
   widenWindow,
+  snapshotSettings,
+  restoreSettings,
+  type SettingsSnapshot,
   type Phase3Fixtures,
 } from "../phase3-helpers";
 import {
@@ -38,6 +41,7 @@ describe("releasing an allocated desk", () => {
   let pool: Pool;
   let db: Db;
   let f: Phase3Fixtures;
+  let settings: SettingsSnapshot;
   // Well before the Monday slot, so the date is inside the booking window.
   const clock = new FixedClock(new Date("2098-12-29T04:00:00Z"));
 
@@ -45,7 +49,18 @@ describe("releasing an allocated desk", () => {
     pool = testPool();
     db = testDb(pool);
     f = await createPhase3Fixtures(db);
-    // MONDAY is 2099-01-05, far outside the default five-day window.
+    /**
+     * MONDAY is 2099-01-05, far outside the default five-day window, so the
+     * window has to be widened for the write path to accept it.
+     *
+     * SNAPSHOT FIRST, AND RESTORE IN afterAll. `settings` is a SINGLETON shared
+     * by every test and by the running application — an earlier version of this
+     * file widened it to 4000 working days and never put it back, which left the
+     * date strip offering hundreds of days and made the recurring-booking suite
+     * try to materialise a booking for every one of them. Every test in the file
+     * timed out and none of them looked like the cause.
+     */
+    settings = await snapshotSettings(db);
     await widenWindow(db, 4000, 8000);
   });
 
@@ -53,6 +68,7 @@ describe("releasing an allocated desk", () => {
     await clearBookings(db, f);
     await db.delete(schema.seatReleases).where(eq(schema.seatReleases.seatId, f.seatB.id));
     await destroyPhase3Fixtures(db, f);
+    await restoreSettings(db, settings);
     await pool.end();
   });
 

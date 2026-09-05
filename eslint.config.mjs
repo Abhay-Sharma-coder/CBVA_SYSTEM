@@ -33,6 +33,8 @@ const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     ignores: [
+      // Scratch scripts, not product code. Gitignored.
+      ".tmp/**",
       "node_modules/**",
       ".next/**",
       "out/**",
