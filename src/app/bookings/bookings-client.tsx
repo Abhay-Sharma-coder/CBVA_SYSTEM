@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { formatInTimeZone } from "date-fns-tz";
 
 import { useClock } from "@/components/app-shell/session";
+import { MyDeskPanel } from "@/components/booking/my-desk-panel";
 import { EditBookingDialog } from "@/components/booking/edit-booking-dialog";
 import {
   useCancelBooking,
@@ -75,9 +76,12 @@ function groupByDate(rows: MyBookingRow[]): Array<[string, MyBookingRow[]]> {
 }
 
 export function BookingsClient({
+  fixedSeatCode,
   slots,
   cutoffMinutes,
 }: {
+  /** The desk allocated to the viewer, when they hold one. Null otherwise. */
+  fixedSeatCode: string | null;
   slots: SlotDefinition[];
   cutoffMinutes: number;
 }) {
@@ -157,6 +161,12 @@ export function BookingsClient({
             </span>
           </TabsTrigger>
           <TabsTrigger value="past">Past</TabsTrigger>
+          <TabsTrigger value="desk">
+            My desk
+            {/* The two adoption features live behind their own tab rather than
+                stacked under the booking list: they are settings about how you
+                use the floor, not things you did today. */}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="upcoming" className="mt-5 space-y-6">
@@ -197,6 +207,10 @@ export function BookingsClient({
               </DateGroup>
             ))
           )}
+        </TabsContent>
+
+        <TabsContent value="desk" className="mt-5">
+          <MyDeskPanel fixedSeatCode={fixedSeatCode} />
         </TabsContent>
       </Tabs>
 

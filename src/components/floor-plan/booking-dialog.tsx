@@ -26,7 +26,38 @@ import { SEAT_STATUS_TOKENS } from "@/components/seat/seat-status";
 import { SeatSwatchWithGlyph } from "@/components/seat/seat-swatch";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, StatusMessage } from "@/components/ui/primitives";
+import { Switch } from "@/components/ui/switch";
+import { request } from "@/components/admin/api";
 import type { FloorPlanSeat, SlotDefinition, SlotKey } from "@/components/floor-plan/types";
+
+/** ISO weekday names, 1 = Monday, matching what the series API expects. */
+const WEEKDAY_NAMES = [
+  "", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+] as const;
+
+/** yyyy-MM-dd to an ISO weekday. Parsed as UTC so no timezone can shift it. */
+function isoWeekdayOf(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  const js = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  return js === 0 ? 7 : js;
+}
+
+interface SeriesResult {
+  created: number;
+  failed: Array<{ bookingDate: string; message: string }>;
+}
+
+function createSeries(body: {
+  seatCode: string;
+  slot: string;
+  weekdays: number[];
+  startsOn: string;
+}): Promise<SeriesResult> {
+  return request<SeriesResult>("/api/series", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
 
 const TZ = "Asia/Kolkata";
 
@@ -72,6 +103,12 @@ export function BookingDialog({
   const [forSomeoneElse, setForSomeoneElse] = useState(false);
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
+  /**
+   * Declared here with the other state, NOT next to the button that uses it —
+   * this component early-returns when there is no seat, so a hook further down
+   * is called conditionally and React's hook order breaks. Caught by lint.
+   */
+  const [repeatWeekly, setRepeatWeekly] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
   const book = useBookSeat();
@@ -117,10 +154,39 @@ export function BookingDialog({
         slot,
         occupantUserId: forSomeoneElse ? person!.id : undefined,
       });
+
+      /**
+       * The repeat is set up AFTER the booking, not instead of it.
+       *
+       * Two separate facts: "I want this desk on Thursday" and "I want it every
+       * Thursday". Making the second replace the first would mean a failed
+       * series silently loses you the desk you were actually trying to book —
+       * so the booking lands first and the repeat is a second, additive step.
+       */
+      let repeatNote = "";
+      if (repeatWeekly && !forSomeoneElse && date) {
+        const weekday = isoWeekdayOf(date);
+        try {
+          const res = await createSeries({
+            seatCode: seat!.seatCode,
+            slot,
+            weekdays: [weekday],
+            startsOn: date,
+          });
+          repeatNote =
+            res.failed.length > 0
+              ? ` It will repeat every ${WEEKDAY_NAMES[weekday]}, though ${res.failed.length} day${res.failed.length === 1 ? " was" : "s were"} already taken.`
+              : ` It will repeat every ${WEEKDAY_NAMES[weekday]} as each new day opens.`;
+        } catch (err) {
+          repeatNote = ` The desk is booked, but the weekly repeat could not be set up: ${(err as ApiError).message}`;
+        }
+      }
+
       setDone(
-        forSomeoneElse
+        (forSomeoneElse
           ? `${seat!.seatCode} is booked for ${person!.displayName}. They have been emailed.`
-          : `${seat!.seatCode} is yours for the ${slotDefinition?.label.toLowerCase() ?? slot}.`,
+          : `${seat!.seatCode} is yours for the ${slotDefinition?.label.toLowerCase() ?? slot}.`) +
+          repeatNote,
       );
     } catch (err) {
       fail(err);
@@ -236,6 +302,22 @@ export function BookingDialog({
           <StatusMessage tone="positive" className="mt-4">
             {done}
           </StatusMessage>
+        ) : null}
+
+        {/* Offered only for your own booking: a repeat on somebody else's
+            behalf commits a colleague to a desk every week without asking
+            them, which is not a decision this dialog should let anybody make
+            in one click. */}
+        {!done && bookable && !forSomeoneElse && date ? (
+          <div className="mt-4 border-t border-hairline pt-4">
+            <Switch
+              label={`Book this desk every ${WEEKDAY_NAMES[isoWeekdayOf(date)]}`}
+              description="Each new day books itself as it comes into the five working-day window. If somebody takes the desk first on one of them you get an email about that day only."
+              checked={repeatWeekly}
+              onCheckedChange={setRepeatWeekly}
+              disabled={busy}
+            />
+          </div>
         ) : null}
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">

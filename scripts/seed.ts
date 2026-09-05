@@ -865,6 +865,7 @@ async function main() {
 
   console.table(counts.rows);
   console.log(`fixed seat pairings: ${fixedPairs}`);
+  console.log(`seat releases: ${releaseRows.length} · recurring series: ${seriesCount}`);
   console.log(`booking dates covered: ${dates.length} working days`);
   await pool.end();
 }
