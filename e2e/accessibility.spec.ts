@@ -259,6 +259,13 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
 
 for (const [name, path, prepare] of CASES) {
   test(`no serious accessibility violations: ${name}`, async ({ page }) => {
+    /**
+     * The seat inventory is 141 rows carrying two selects each, so axe walks
+     * roughly 1,100 interactive nodes. That is a real cost of auditing the
+     * whole page rather than a sample, and it does not fit the suite's 60s
+     * default — the assertion underneath is unchanged.
+     */
+    if (name === "seat inventory") test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(path);
     await page.getByLabel("Sign in as a different person (demo)").waitFor();
@@ -277,6 +284,9 @@ for (const [name, path, prepare] of CASES) {
 }
 
 test("every seat is a real button with an accessible name", async ({ page }) => {
+  // Runs after the heaviest specs in the file, against a dev server that has
+  // just compiled nine admin routes. The floor plan itself is fast.
+  test.setTimeout(120_000);
   await page.goto("/floor");
   await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
 

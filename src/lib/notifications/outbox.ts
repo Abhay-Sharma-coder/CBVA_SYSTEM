@@ -62,7 +62,13 @@ export interface EnqueueInput {
  * is swallowed here rather than raised: "this was already queued" is the
  * correct outcome for an idempotent job, not an error.
  */
-export async function enqueueNotification(db: DbLike, input: EnqueueInput): Promise<void> {
+/**
+ * @returns whether a row was actually written. False means an identical message
+ *   already existed and the once-only index absorbed it — which is a normal
+ *   outcome for a job-emitted kind, and the signal callers need to tell a NEW
+ *   event from one they have already recorded.
+ */
+export async function enqueueNotification(db: DbLike, input: EnqueueInput): Promise<boolean> {
   const insert = db.insert(schema.notificationLog).values({
     kind: input.kind,
     bookingId: input.bookingId ?? null,
@@ -79,10 +85,13 @@ export async function enqueueNotification(db: DbLike, input: EnqueueInput): Prom
   });
 
   if (JOB_EMITTED_KINDS.has(input.kind)) {
-    await insert.onConflictDoNothing();
-    return;
+    const rows = await insert.onConflictDoNothing().returning({
+      id: schema.notificationLog.id,
+    });
+    return rows.length > 0;
   }
   await insert;
+  return true;
 }
 
 export interface DispatchResult {

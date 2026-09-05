@@ -18,7 +18,7 @@ import {
   Td,
   Th,
 } from "@/components/ui/primitives";
-import { TableSkeleton } from "@/components/ui/skeleton";
+import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
 import { Stat, StatRow } from "@/components/ui/stat";
 import { Switch } from "@/components/ui/switch";
 
@@ -101,6 +101,16 @@ export function UsersClient() {
     <div className="space-y-6">
       {notice ? <StatusMessage tone={notice.tone}>{notice.text}</StatusMessage> : null}
 
+      {/*
+        Skeleton rather than the derived numbers while the roster loads: `rows`
+        is [] until then, so the tiles would read "Must book 0 / Allocated 0",
+        which is confident wrong information rather than a loading state — and
+        on this screen those two numbers are the denominator of the whole
+        product.
+      */}
+      {users.isPending ? (
+        <Skeleton className="h-28" label="Loading the staff summary" />
+      ) : (
       <StatRow>
         <Stat
           label="Must book"
@@ -119,6 +129,7 @@ export function UsersClient() {
           hint="Their name is hidden from colleagues. Their desk still counts."
         />
       </StatRow>
+      )}
 
       <StatusMessage tone="neutral">
         The Manager / Assistant Manager split shown here is{" "}

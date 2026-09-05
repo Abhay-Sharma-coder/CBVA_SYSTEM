@@ -220,12 +220,28 @@ export async function materialiseSeries(
           message: err.message,
         };
         result.failed.push(failure);
-        result.notified += await notifyFailure(db, settings.slotDefinitions, failure, occupant);
+        result.notified += (await notifyFailure(
+          db,
+          settings.slotDefinitions,
+          failure,
+          occupant,
+        ))
+          ? 1
+          : 0;
       }
     }
   }
 
-  if (!dryRun && (result.created > 0 || result.failed.length > 0)) {
+  /**
+   * Audit only when something actually CHANGED.
+   *
+   * `failed` is not a change — a series whose desk is permanently taken fails
+   * on every tick, so auditing on it wrote an identical row every five minutes
+   * forever: ~288 a day of pure noise in the log an admin opens precisely to
+   * find out what happened. `notified` counts rows the once-only index actually
+   * accepted, so a NEW failure is still recorded exactly once.
+   */
+  if (!dryRun && (result.created > 0 || result.notified > 0)) {
     await writeAudit(db, {
       actorUserId: null,
       entity: "booking_series",
@@ -272,7 +288,7 @@ async function notifyFailure(
   slotDefinitions: SlotDefinition[],
   failure: SeriesFailure,
   occupant: User,
-): Promise<number> {
+): Promise<boolean> {
   const slot = findSlot(slotDefinitions, failure.slot) ?? {
     key: failure.slot,
     label: failure.slot,
@@ -280,7 +296,7 @@ async function notifyFailure(
     end: "",
   };
 
-  await enqueueNotification(db, {
+  return enqueueNotification(db, {
     kind: "series_occurrence_failed",
     to: occupant.email,
     seriesId: failure.seriesId,
@@ -296,7 +312,6 @@ async function notifyFailure(
       onBehalf: false,
     }),
   });
-  return 1;
 }
 
 /* ------------------------------------------------------------- the writes */
