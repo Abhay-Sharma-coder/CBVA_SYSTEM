@@ -46,6 +46,47 @@ function extract() {
   }
 }
 
+/**
+ * ASSUMPTIONS A24, and the reason this step exists at all.
+ *
+ * The extractor cannot place eleven of the 141 desks from the drawing -- those
+ * bays yield fewer chair blocks than the schedule calls for -- so it
+ * interpolates them by dividing up the bay. That spacing is not the drawing's,
+ * and it put fifteen pairs of desks closer together than a desk is wide, the
+ * worst 6 cm apart. Phase 5 fixed it by running
+ * `scripts/fix-interpolated-anchors.mjs --write` BY HAND, once, over the
+ * committed file.
+ *
+ * Which quietly broke the build. From that moment `npm run build:floorplan`
+ * regenerated seats.json from the PDF and reverted all eleven, and nothing
+ * said so: the phase gate compared two consecutive BUILDS to each other and
+ * they always agreed. It was proving the build deterministic, never that it
+ * produced the file in the repository. That is a false green, which is worse
+ * than a red -- it is a check that reports success for a property nobody is
+ * testing. Verified by reproducing it: a Phase 6 build reverted exactly those
+ * eleven anchors and took the floor from 0 colliding pairs back to 15.
+ *
+ * So the de-collide is part of the pipeline now rather than a thing somebody
+ * remembered to do. It is deterministic -- each interpolated desk is re-placed
+ * along its own bay's axis at the drawing's measured 23.02-unit (1,624 mm)
+ * pitch, then relaxed a step at a time until it clears every other desk -- and
+ * it refuses to write if any collision remains, so it is its own safety net.
+ *
+ * It must run on FRESH extractor output and exactly once. Run over its own
+ * result, the relaxation pass would be measuring against already-moved
+ * neighbours rather than the ones the extractor produced.
+ */
+function decollide() {
+  const script = path.join(ROOT, "scripts", "fix-interpolated-anchors.mjs");
+  const run = spawnSync(process.execPath, [script, "--write"], {
+    stdio: "inherit",
+    cwd: ROOT,
+  });
+  if (run.status !== 0) {
+    throw new Error(`fix-interpolated-anchors exited ${run.status}`);
+  }
+}
+
 async function rasterise() {
   const svgPath = path.join(DATA, "plan-texture.svg");
   if (!existsSync(svgPath)) throw new Error(`missing ${svgPath}`);
@@ -101,6 +142,30 @@ function validate() {
   const codes = new Set(seats.seats.map((s) => s.seatCode));
   if (codes.size !== seats.seats.length) problems.push("duplicate seat codes");
 
+  // No two desks inside a desk width of each other (A24). The de-collide step
+  // above is what makes this true; asserting it here is what stops the two
+  // drifting apart again. 1.30 m at meta.mmPerUnit.
+  if (meta.mmPerUnit) {
+    const minUnits = 1300 / meta.mmPerUnit;
+    let worst: { a: string; b: string; m: number } | null = null;
+    for (let i = 0; i < seats.seats.length; i++) {
+      for (let k = i + 1; k < seats.seats.length; k++) {
+        const p = seats.seats[i];
+        const q = seats.seats[k];
+        const d = Math.hypot(p.planX - q.planX, p.planY - q.planY);
+        if (d < minUnits && (worst === null || d < worst.m)) {
+          worst = { a: p.seatCode, b: q.seatCode, m: d };
+        }
+      }
+    }
+    if (worst) {
+      const metres = ((worst.m * meta.mmPerUnit) / 1000).toFixed(3);
+      problems.push(
+        `desks overlap: ${worst.a} and ${worst.b} are ${metres} m apart (A24)`,
+      );
+    }
+  }
+
   const b = meta.planBounds;
   for (const s of seats.seats) {
     if (
@@ -150,6 +215,7 @@ function validate() {
 
 async function main() {
   extract();
+  decollide();
   await rasterise();
   validate();
 }

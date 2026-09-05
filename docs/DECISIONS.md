@@ -994,3 +994,108 @@ nothing, and a laptop should not be locked out of its own demo.
 **Cost.** The demo panel now goes through a second route. That is arguably
 better anyway: it puts running the jobs on the same footing as every other admin
 action rather than giving it a private front door with different rules.
+
+---
+
+## ADR-042 — The partition layer carries a colour key, so read it
+
+**Decision.** `walls.json`'s `partition` class takes only **black-stroked**
+paths from `P-FULLHEIGHT PARTITION`. `cadparse.py` retains stroke and fill
+colour per path, riding them on the `q`/`Q` graphics-state stack alongside the
+CTM. The filter is scoped to that one layer; `I-PART-FULL` passes through whole.
+
+**Why.** The layer is 6,444 paths and 200 of them are partitions. By stroke:
+
+| stroke | paths | length | extent |
+|---|---|---|---|
+| `#FF4405` | 5,012 | 34,916 | C and D wings only |
+| `#0037DD` | 1,152 | 1,473 | one narrow vertical band |
+| `#000000` | **200** | **9,347** | the whole floor |
+| `#006EDD` | 52 | 351 | |
+| `#8AB85C` | 28 | 398 | one 31×31 unit symbol |
+
+The black paths average 47 units each and are spread over the whole plan: the
+real room dividers. The orange averages 7 units and sits inside the workstation
+bays: the dot fill of the solid rapid-rail benches. Flat on a drawing that is
+texture; extruded to 1.35 m it is a wall through the middle of every bay.
+
+The colour was there all along and the parser discarded it — `RG` and `rg` fell
+through to the operand reset. Recovering it is three branches, because every
+colour in this file is a plain 3-operand DeviceRGB: there is not one `sc`,
+`scn`, `SCN`, `g`, `G`, `k` or `K` operator in the whole content stream.
+
+**Colour must ride the `q`/`Q` stack.** The drawing sets `RG` inside nested
+blocks; a bare global leaks one block's colour into the next and mis-attributes
+paths wholesale. That is the one line in this change that is easy to get wrong
+and produces plausible-looking output when you do.
+
+**Measured, and the numbers are the argument.** wall 97 → 97 polygons and
+11,875 → 11,875 units; glazing 280 → 280 and 14,692 → 14,692 — both classes
+untouched. partition 157 → 85, 14,119 → 8,850. Rendered before and after and
+diffed: all 80 removed polygons lie inside a C or D bay along a bench run. No
+room divider and no part of the envelope goes.
+
+**The envelope, written down because it was not obvious.** The outer cruciform
+is `W-WALL` — 165 black paths, bbox `[89 109 1361 1058]`, the only layer
+touching all four edges of `PLAN_BOX (85, 95, 1370, 1065)`, chaining to 71
+polygons of which the longest (858 units) is the outline itself. `C- COLOUMN`
+adds 23 chains for the core ring. It is named explicitly in `WALL_CLASSES`, so
+it is not arriving by accident and cannot leave by accident.
+`P-FULLHEIGHT PARTITION` black is inset ~80 units on every side and is interior
+only, which is why filtering it cannot touch the shell.
+
+**Cost, and the deliberate limits.** Only the extruded shell filters. The baked
+texture still paints every colour on this layer — it is the architect's drawing
+and nothing is deleted from it — and `planmask` still floods the whole layer,
+because narrowing its input would move `interiorCoverage` off 0.5775 and with it
+`coreCentre` and every zone hull. `zones.json`, `detected-modules.json`,
+`detection-report.json` and both webps came back byte-identical, which is the
+evidence that it did not.
+
+---
+
+## ADR-043 — The de-collide step belongs in the build, because the gate proving otherwise was vacuous
+
+**Decision.** `npm run build:floorplan` runs
+`scripts/fix-interpolated-anchors.mjs --write` between the Python extract and
+the rasterise. `validate()` additionally refuses any build in which two desks
+sit closer than 1.30 m.
+
+**Why.** Phase 5 fixed A24 by running that script **by hand, once**, over the
+committed `seats.json`. From that moment the build no longer reproduced the
+repository: regenerating from the PDF reverted all eleven interpolated anchors
+and took the floor from 0 colliding desk pairs back to 15, the worst 6 cm apart.
+
+**Nothing reported it, and the check that should have is the interesting part.**
+Phases 4 and 5 both gated on the geometry coming back "byte-identical". That
+gate compared two consecutive **builds to each other**. Two runs of a
+deterministic program always agree, so it passed — while the property anyone
+reading it would assume, that the build produces the file in the repository, had
+been false since the hand-edit. **A false green is worse than a red**: a red is
+a bug, a false green is a bug plus a reason not to look for it. Reproduced
+before fixing: a Phase 6 build moved exactly those eleven anchors and no others.
+
+The de-collide is a fair thing to automate. It is deterministic — each
+interpolated desk is re-placed along its own bay's axis at the drawing's
+measured 23.02-unit (1,624 mm) pitch, then relaxed a step at a time until clear
+of every other desk on the floor — and it already refused to write if any
+collision remained.
+
+**It must run once, on fresh extractor output.** Run over its own result the
+relaxation would measure against already-moved neighbours instead of the ones
+the extractor produced, and the fixed point is not guaranteed to be the same.
+
+**The guard is the durable half.** Verified by negative test: silent on the
+committed file, fires on a synthetic 7 cm nudge, and fires on the real pre-A24
+geometry naming `C7-04` and `PA-15` at 0.061 m. The script and the assertion can
+now only drift apart loudly.
+
+**Cost.** The build depends on a second script, and `seats.json` stays
+pretty-printed where every other generated file is compact — that formatting is
+the fix's own output and changing it would be churn for nothing.
+
+**A note for anyone verifying byte-identity on Windows.** This repository is
+checked out with `core.autocrlf=true`, so git rewrites LF to CRLF in the working
+tree and a raw `sha256sum` of a checked-out file does not match its blob.
+`git diff --exit-code` is the gate; a hash comparison is only valid between two
+files the build itself wrote.
