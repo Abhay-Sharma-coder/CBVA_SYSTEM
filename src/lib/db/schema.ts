@@ -265,6 +265,13 @@ export const meetingRooms = pgTable(
       .notNull()
       .references(() => floors.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
+    /**
+     * The architect's bay tag for this room -- A3, A9, A8, A7, A6. It is the
+     * join key between /rooms and the floor plan: the plan labels a room by
+     * bay, and without this the two could only be matched on a display name
+     * that CBVA is expected to change.
+     */
+    bayCode: text("bay_code"),
     capacity: integer("capacity").notNull(),
     amenities: jsonb("amenities").notNull().default(sql`'{}'::jsonb`),
     /** Outlook room resource mailbox. Null until IT gives us the list. */

@@ -112,17 +112,37 @@ export function seatTypeForBay(bay: string): "workstation" | "passage" | "foldab
 }
 
 /**
- * MEETING ROOMS — ASSUMPTION. See docs/ASSUMPTIONS.md #3.
- * Read off the pax annotations in Zones A and B of the drawing. Names are ours;
- * CBVA may call them something else entirely.
+ * MEETING ROOMS — five, all in Zone A, from the drawing's own annotations.
+ *
+ * Phase 1 seeded six provisionally (25, 10, 8, 7, 6, 4). Two capacities were
+ * wrong and one room did not exist. Re-read at the vector level, every zone-A
+ * room tag pairs to a PAX annotation within 33 plan units:
+ *
+ *     A3 -> 25 PAX (18.6 units)    A9 -> 10 PAX (32.2)
+ *     A8 ->  7 PAX (25.9)          A7 ->  5 PAX (25.3)
+ *     A6 ->  5 PAX (25.9)
+ *
+ * plus A2 -> 8 PAX, which is the A1/A2 workstation run and not a room, and A4
+ * (storage) and A5 (lounge), which carry no PAX at all. 25+10+7+5+5+8 = 60,
+ * which is the drawing's whole zone-A count.
+ *
+ * There are no meeting rooms in Zone B. It has zero PAX annotations anywhere
+ * and zero workstation hatch; it is the flexible room. See ASSUMPTIONS A16.
+ *
+ * `bayCode` is the join key to the floor plan, so a room on the plan and a row
+ * on /rooms are the same thing rather than two lists that agree by convention.
+ * The NAMES are still ours (A3 aside, "Boardroom" is what the drawing's own
+ * "EXISTING HERMENMILLER CHAIRS IN BOARD ROOM TO RETAIN - 25 NOS" note calls
+ * it). Bay-coded rather than invented, so there is one fewer thing to be wrong
+ * about than "Conference A". ASSUMPTIONS A3 — capacities now come from the
+ * drawing; names and the Outlook resource mailboxes do not.
  */
 export const MEETING_ROOMS = [
-  { name: "Boardroom", capacity: 25, amenities: { screen: true, vc: true, whiteboard: true } },
-  { name: "Conference A", capacity: 10, amenities: { screen: true, vc: true } },
-  { name: "Conference B", capacity: 8, amenities: { screen: true, vc: false } },
-  { name: "Meeting Room 1", capacity: 7, amenities: { screen: true, vc: false } },
-  { name: "Meeting Room 2", capacity: 6, amenities: { screen: false, vc: false } },
-  { name: "Huddle Room", capacity: 4, amenities: { screen: false, vc: true } },
+  { bayCode: "A3", name: "Boardroom", capacity: 25, amenities: { screen: true, vc: true, whiteboard: true } },
+  { bayCode: "A9", name: "Meeting Room A9", capacity: 10, amenities: { screen: true, vc: true } },
+  { bayCode: "A8", name: "Meeting Room A8", capacity: 7, amenities: { screen: true, vc: false } },
+  { bayCode: "A7", name: "Meeting Room A7", capacity: 5, amenities: { screen: false, vc: false } },
+  { bayCode: "A6", name: "Meeting Room A6", capacity: 5, amenities: { screen: false, vc: false } },
 ] as const;
 
 /**

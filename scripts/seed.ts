@@ -17,7 +17,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local", quiet: true });
 
-import { sql } from "drizzle-orm";
+import { notInArray, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { v5 as uuidv5 } from "uuid";
@@ -466,7 +466,29 @@ async function main() {
     .set({ status: "blocked" })
     .where(sql`${schema.seats.seatCode} = 'PD-18'`);
 
-  /* ---- meeting rooms ---- */
+  /* ---- meeting rooms ----
+     Phase 6 replaced six provisional rooms with the five the drawing actually
+     shows, so this needs a DELETE that the rest of the seed does not: the
+     upsert below conflicts on `name` and therefore cannot see a row whose name
+     is no longer in MEETING_ROOMS. Without this, every database seeded before
+     Phase 6 keeps "Conference A", "Conference B" and "Huddle Room" forever,
+     and /rooms shows eight rooms on a floor that has five.
+
+     Safe here and nowhere else: room_bookings.room_id is ON DELETE restrict,
+     and every room_bookings row was deleted above. Moving this earlier would
+     make it fail on a floor in use, which is the correct way round. */
+  const keptRoomNames = MEETING_ROOMS.map((r) => r.name);
+  const removedRooms = await db
+    .delete(schema.meetingRooms)
+    .where(notInArray(schema.meetingRooms.name, keptRoomNames))
+    .returning({ name: schema.meetingRooms.name });
+  if (removedRooms.length > 0) {
+    console.log(
+      `  removed ${removedRooms.length} meeting room(s) no longer in the drawing: ` +
+        removedRooms.map((r) => r.name).join(", "),
+    );
+  }
+
   await db
     .insert(schema.meetingRooms)
     .values(
@@ -474,6 +496,7 @@ async function main() {
         id: id("room", r.name),
         floorId,
         name: r.name,
+        bayCode: r.bayCode,
         capacity: r.capacity,
         amenities: r.amenities,
         outlookResourceEmail: null,
@@ -483,6 +506,7 @@ async function main() {
     .onConflictDoUpdate({
       target: schema.meetingRooms.name,
       set: {
+        bayCode: sql`excluded.bay_code`,
         capacity: sql`excluded.capacity`,
         amenities: sql`excluded.amenities`,
       },

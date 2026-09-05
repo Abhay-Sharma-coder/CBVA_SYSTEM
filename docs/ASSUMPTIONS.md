@@ -68,18 +68,48 @@ the wrong desks greyed out. Answering this is now a five-minute edit in
 
 ---
 
-### A3 — Are the six meeting rooms right, and what are they called?
+### A3 — 🟠 PARTLY CLOSED in Phase 6 — the drawing settles how many rooms and how big; the names are still ours
 
-**Assumed:** Boardroom 25, Conference A 10, Conference B 8, Meeting Room 1 7,
-Meeting Room 2 6, Huddle Room 4.
+**Was assumed (Phase 1):** six rooms — Boardroom 25, Conference A 10, Conference
+B 8, Meeting Room 1 7, Meeting Room 2 6, Huddle Room 4.
 
-**Affects:** `src/lib/seed-data/inventory.ts` → `MEETING_ROOMS`.
+**Now, from the drawing:** **five**, all in Zone A. Every zone-A room tag pairs
+to a `N PAX.` annotation within 33 plan units:
 
-**Why it matters:** capacities are read off the pax annotations in Zones A and B
-of the drawing; the **names are entirely ours**. CBVA will have its own names,
-probably after clients or partners. Also needed: the Outlook room resource
-mailbox for each, which is null on every row today and blocks the Graph calendar
-sync in Phase 3 (`meeting_rooms.outlook_resource_email`).
+| Bay | Name (ours) | Capacity (the drawing's) | Distance tag → PAX |
+|---|---|---|---|
+| A3 | Boardroom | **25** | 18.6 units |
+| A9 | Meeting Room A9 | **10** | 32.2 |
+| A8 | Meeting Room A8 | **7** | 25.9 |
+| A7 | Meeting Room A7 | **5** | 25.3 |
+| A6 | Meeting Room A6 | **5** | 25.9 |
+
+**Two capacities were wrong and one room did not exist.** Phase 1 had an 8 and a
+6 and a 4-person huddle room; the drawing has no 8, no 6 and no 4-person room in
+Zone A at all. It reconciles independently: 25 + 10 + 7 + 5 + 5 = 52, plus the
+`8 PAX` on the A1/A2 workstation run = 60, which is exactly the zone-A total,
+and the sheet note *"CONFERENCE AREA AND CAFETERIA NOT INCLUDED"* is why those
+52 are outside the 141.
+
+**There are no meeting rooms in Zone B.** It has zero PAX annotations anywhere
+and zero workstation hatch of either colour. See A16.
+
+**Affects:** `src/lib/seed-data/inventory.ts` → `MEETING_ROOMS`,
+`meeting_rooms.bay_code` (new in Phase 6, migration 0004).
+
+**What is still open, and it is the part that blocks anything:**
+
+1. **The names.** Still entirely ours. They are now bay-coded — "Meeting Room
+   A9" rather than "Conference A" — which is one fewer invention, because the
+   bay tag is the architect's. "Boardroom" is the drawing's own word, from
+   *"EXISTING HERMENMILLER CHAIRS IN BOARD ROOM TO RETAIN - 25 NOS"*. CBVA will
+   still have its own names, probably after clients or partners.
+2. **The Outlook room resource mailbox** for each, null on every row.
+   `meeting_rooms.outlook_resource_email`. This is what blocks the Graph
+   calendar sync, and it is **A17** — unaffected by anything Phase 6 did.
+
+**Each room now carries its bay code**, so the floor plan and `/rooms` join on
+the architect's tag rather than on a display name CBVA is expected to change.
 
 ---
 
