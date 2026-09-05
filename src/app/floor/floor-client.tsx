@@ -19,8 +19,12 @@ import {
 import { BookingDialog } from "@/components/floor-plan/booking-dialog";
 import { useMyBookings } from "@/components/booking/use-bookings";
 import { useClock } from "@/components/app-shell/session";
+import type { ZoneCode } from "@/lib/floorplan";
 import type {
   BookableDay,
+  FloorPlanMode,
+  FloorPlanView,
+  SlotKey,
   FloorPlanPayload,
   FloorPlanSeat,
   SlotDefinition,
@@ -71,6 +75,8 @@ export function FloorClient() {
   const pathname = usePathname();
   const params = useSearchParams();
   const hydrated = useRef(false);
+  /** Armed by any control below; see the URL sync effect for why it exists. */
+  const userChanged = useRef(false);
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -102,19 +108,32 @@ export function FloorClient() {
    * re-renders from the query string after the hydrate-once effect above.
    */
   useEffect(() => {
-    if (!hydrated.current || activeDate === null) return;
-    // Only ever write the floor screen's own URL.
+    // ONLY SYNC WHAT THE USER ACTUALLY CHANGED. This is the third attempt, and
+    // the first two are worth recording because both were fixes to the symptom.
     //
-    // Phase 3 stopped this effect from CANCELLING a navigation off /floor by
-    // dropping `router.replace`. It did not stop it from firing after one has
-    // already happened: this component stays mounted through the exit
-    // transition, `usePathname()` has by then moved on, and the effect happily
-    // stamped `/bookings?date=…&slot=AM` — or, once `pathname` had not yet
-    // updated, put /floor back in the address bar over the page the user had
-    // just opened. The shell's navigation spec caught it the same way it caught
-    // the first version, by clicking away during the second it takes the
-    // default date to arrive.
-    if (pathname !== "/floor") return;
+    // Phase 3: the effect used `router.replace`, and a navigation cancels the
+    // navigation already in flight — clicking "My Bookings" in the wrong second
+    // aborted the click. Fixed by dropping to `history.replaceState`.
+    //
+    // Phase 4, first attempt: guard on `pathname !== "/floor"`. It fails the
+    // same spec, because `usePathname()` only updates when the new route
+    // COMMITS. Reading `window.location.pathname` instead does not help either:
+    // during a soft navigation the address bar has not changed yet, so at the
+    // moment of the write the browser also still says "/floor". Every version
+    // of "am I still on this page?" is blind in exactly the window that races.
+    //
+    // The window is not the point. The WRITE is. There is exactly one URL sync
+    // that fires without anybody doing anything — the one triggered by the
+    // default date arriving from /api/floor/dates, about a second after load —
+    // and that is the one landing on top of the click. On a warm machine the
+    // date arrives before the user can click and nothing goes wrong, which is
+    // why this reads as flakiness rather than as a race.
+    //
+    // So: sync in response to a user action, and never otherwise. The default
+    // date is a default, not a choice, and a bare `/floor` resolves to the same
+    // screen anyway. The moment anybody touches a control the URL starts
+    // tracking everything, date included, so the shareable link is unaffected.
+    if (!userChanged.current || activeDate === null) return;
     const next = new URLSearchParams();
     next.set("date", activeDate);
     next.set("slot", activeSlot);
@@ -130,6 +149,46 @@ export function FloorClient() {
       window.history.replaceState(null, "", `${pathname}?${query}`);
     }
   }, [activeDate, activeSlot, activeZone, view, mode, params, pathname]);
+
+  /**
+   * The controls, wrapped so that using one arms the URL sync above. Nothing
+   * else may set this — that is the whole mechanism.
+   */
+  const onChangeDate = useCallback(
+    (d: string) => {
+      userChanged.current = true;
+      setActiveDate(d);
+    },
+    [setActiveDate],
+  );
+  const onChangeSlot = useCallback(
+    (sl: SlotKey) => {
+      userChanged.current = true;
+      setActiveSlot(sl);
+    },
+    [setActiveSlot],
+  );
+  const onChangeZone = useCallback(
+    (z: ZoneCode | null) => {
+      userChanged.current = true;
+      setActiveZone(z);
+    },
+    [setActiveZone],
+  );
+  const onChangeView = useCallback(
+    (v: FloorPlanView) => {
+      userChanged.current = true;
+      setView(v);
+    },
+    [setView],
+  );
+  const onChangeMode = useCallback(
+    (m: FloorPlanMode) => {
+      userChanged.current = true;
+      setMode(m);
+    },
+    [setMode],
+  );
 
   const dates = useQuery({
     queryKey: ["floor", "dates"],
@@ -232,8 +291,8 @@ export function FloorClient() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {view === "plan" ? <ModeToggle mode={mode} onChange={setMode} /> : null}
-          <ViewToggle view={view} onChange={setView} />
+          {view === "plan" ? <ModeToggle mode={mode} onChange={onChangeMode} /> : null}
+          <ViewToggle view={view} onChange={onChangeView} />
         </div>
       </div>
 
@@ -244,15 +303,15 @@ export function FloorClient() {
               <DateStrip
                 days={dates.data.days}
                 active={activeDate}
-                onChange={setActiveDate}
+                onChange={onChangeDate}
               />
-              <SlotToggle slots={slots} active={activeSlot} onChange={setActiveSlot} />
+              <SlotToggle slots={slots} active={activeSlot} onChange={onChangeSlot} />
             </>
           ) : (
             <div className="h-20 rounded-sm bg-surface-sunken" />
           )}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <ZoneFilter active={activeZone} onChange={setActiveZone} />
+            <ZoneFilter active={activeZone} onChange={onChangeZone} />
             <Legend counts={counts} />
           </div>
         </CardBody>

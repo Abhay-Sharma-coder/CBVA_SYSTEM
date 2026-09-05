@@ -562,11 +562,38 @@ On the 2D plan, two anchors 6 cm apart on a 90-metre floor are the same pixel at
 fit-to-floor zoom, so this has been on screen since Phase 2 and was invisible.
 Two solid desks 6 cm apart are not.
 
-**What it does and does not affect.** Nothing about booking: all 141 desks
-exist, are individually bookable, and every constraint holds — this is where a
-desk is *drawn*, not whether it is real. The count of 141 is confirmed three
-independent ways and is not in question. What it affects is whether somebody can
-find their desk from the plan, which for eleven of them today they cannot.
+**The overlap set is exactly the interpolated set, and that is the good news.**
+Checked rather than assumed:
+
+| | |
+|---|---|
+| pairs closer than 1.30 m | **15** |
+| of those, detected + interpolated | 11 |
+| of those, interpolated + interpolated | 4 |
+| of those, **detected + detected** | **0** |
+| closest detected-to-detected pair anywhere | **1.357 m** — clear of a desk |
+| interpolated anchors *not* in a collision | **none** |
+
+So the eleven inferred anchors are the entire problem, and all eleven of them
+are a problem. The 130 detected anchors do not collide with each other at all;
+the eight that appear in the table above are victims, each with an interpolated
+neighbour placed on top of it. Detection is sound and needs no re-examination
+before Phase 5 — this is bounded, known, and fixable by hand.
+
+**What it does and does not affect.** This is visual and interaction, not
+numerical. Nothing about booking: all 141 desks exist, are individually
+bookable, and every constraint holds — this is where a desk is *drawn*, not
+whether it is real. Seat identity and occupancy counts are untouched, so unlike
+A1 and A16 it does **not** gate Phase 5's analytics.
+
+It does gate the **demo**. Two desks at one pixel means a click resolves
+ambiguously, and the person clicking is a partner watching for the first time.
+Treat it as a pre-demo fix.
+
+**Ours, not theirs.** A24 is deliberately not part of the client trio (A1, A16,
+A17). Those are questions only CBVA can answer; this is a defect we introduced
+and can fix ourselves — we need somebody who knows the floor for fifteen
+minutes, not a decision.
 
 **How it gets fixed.** `/admin/floor-plan` exists for exactly this (ADR-017):
 drag the eleven, and the export writes them back to `seats.json` marked

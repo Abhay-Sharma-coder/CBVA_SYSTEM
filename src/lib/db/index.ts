@@ -26,12 +26,36 @@ const globalPools = globalThis as unknown as {
 };
 
 function makePool(connectionString: string): Pool {
-  return new Pool({
+  const created = new Pool({
     connectionString,
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 15_000,
   });
+
+  /**
+   * WITHOUT THIS LISTENER, A DROPPED CONNECTION KILLS THE PROCESS.
+   *
+   * `pg` emits `error` on an idle client when the server goes away — Neon
+   * suspending an idle compute, a laptop's wifi blinking, a DNS lookup failing.
+   * `error` is one of Node's special-cased events: unhandled, it is not
+   * swallowed, it is rethrown as an uncaughtException. So a blip that the pool
+   * is perfectly capable of recovering from by opening a new connection instead
+   * took the whole dev server down.
+   *
+   * Twice in one afternoon a transient `getaddrinfo ENOTFOUND …neon.tech`
+   * turned into `uncaughtException: Connection terminated unexpectedly` and
+   * every test after it failed. The same blip during a demo would end the demo.
+   *
+   * The pool discards the broken client and opens a fresh one on the next
+   * checkout; there is nothing to do here but decline to die. It is logged
+   * rather than silenced, because a pool erroring repeatedly is worth seeing.
+   */
+  created.on("error", (err) => {
+    console.error("[db] idle client error, discarding connection:", err.message);
+  });
+
+  return created;
 }
 
 export function pool(): Pool {

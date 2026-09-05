@@ -714,3 +714,31 @@ error boundary. There is deliberately no `error.tsx` anywhere in this app; a
 route-level error page would replace the whole floor screen when all that has
 failed is one optional rendering of it. A blank black rectangle in front of a
 partner is worse than never having offered 3D at all.
+
+---
+
+## ADR-033 — Both pools carry an `error` listener, because otherwise a blip is fatal
+
+**Decision.** `makePool()` in `src/lib/db/index.ts` attaches
+`pool.on("error", …)` to both the pooled and the direct pool. It logs and
+returns.
+
+**Why.** `pg` emits `error` on an *idle* client when the server goes away —
+Neon suspending an idle compute, wifi blinking, a DNS lookup failing. `error`
+is one of Node's special-cased events: with no listener it is not swallowed, it
+is rethrown as an `uncaughtException`. So a condition the pool recovers from by
+itself, by discarding the client and opening a new one, instead killed the
+process.
+
+This was not theoretical. Two full e2e runs in one afternoon were destroyed by
+a transient `getaddrinfo ENOTFOUND …neon.tech`, which surfaced as
+`uncaughtException: Connection terminated unexpectedly` from the dev server and
+failed every test after it. The suite could not be verified green until this was
+fixed, which is how it was found.
+
+The same blip during a live demo would have ended the demo, in front of the
+people the product is being sold to.
+
+**Cost.** None worth naming. The handler declines to die and logs; the pool's
+own recovery is unchanged. It is deliberately not silent, because a pool
+erroring repeatedly is a real signal and should be visible in the server log.

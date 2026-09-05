@@ -216,7 +216,7 @@ labelled control away.
 
 ## 8. Defects, all fixed
 
-Nine, and most of them were the same mistake in different clothes: **assuming a
+Eleven, and most of them were the same mistake in different clothes: **assuming a
 cause instead of measuring one.** Every one was settled in the end by sampling a
 pixel, counting a coverage, or reading a frame counter.
 
@@ -284,24 +284,55 @@ pixel, counting a coverage, or reading a frame counter.
    the recorder snapshots the DOM on every one of ~100 pointer moves, which was
    the difference between seconds and a four-minute timeout.
 
-9. **Navigating away from `/floor` put you back on `/floor`.** The shell's
-   navigation spec caught this for the second time. Phase 3 stopped the URL-sync
-   effect from *cancelling* a navigation by dropping `router.replace` for
-   `history.replaceState`; it did not stop it from firing *after* one. The floor
-   client stays mounted through the exit transition, so a click on "My Bookings"
-   during the second it takes the default date to arrive was followed by the
-   effect stamping `/floor?date=…&slot=AM` back over the address bar. The effect
-   now returns early unless `pathname === "/floor"` — it exists to sync one
-   screen's URL and has no business writing any other.
+9. **Navigating away from `/floor` did not work at all, on a cold server.** The
+   shell's navigation spec caught this for the second time in two phases, and
+   the first two fixes were both aimed at the symptom.
 
-   Worth noting for whoever touches this next: both failures presented as
-   flakiness, because both are races that only lose while the first query is
-   still in flight. Neither reproduces on a warm machine.
+   Phase 3 dropped `router.replace` for `history.replaceState`, because a
+   navigation cancels the navigation already in flight. Phase 4's first attempt
+   guarded on `pathname !== "/floor"` — which fails, because `usePathname()`
+   only updates when the new route *commits*. Reading `window.location.pathname`
+   instead fails identically: during a soft navigation the address bar has not
+   changed yet either. **Every version of "am I still on this page?" is blind in
+   exactly the window that races.**
+
+   The window was never the point; the write was. Exactly one URL sync fires
+   without anybody doing anything — the one triggered by the default date
+   arriving from `/api/floor/dates`, about a second after load — and that is the
+   one landing on top of the click. On a warm machine the date arrives before a
+   person could click, which is why it read as flakiness for two phases: it
+   failed cold and passed warm, at a rate of about one run in three.
+
+   The sync now fires only in response to a user action. The controls are
+   wrapped to arm it and nothing else may.
+
+   **This is a deliberate behaviour change, not just a fix.** Landing on
+   `/floor` no longer writes `?date=…&slot=AM` by itself, and
+   `floor-url-state.spec.ts` was updated to say so. A bare `/floor` resolves to
+   the same screen, so what is lost is sharing the *default* day without
+   touching anything; the moment any control is used the URL carries everything,
+   date included. Two navigation-breaking bugs is a high price for that.
+
+   Verified the way a race has to be: two cold runs from `rm -rf .next`, both
+   10/10, having reproduced 2/2 cold before the fix.
 
 10. **The camera buttons sat under the demo panel on a phone.** The panel is
     pinned to the bottom-right of the viewport and the scene controls to the
     bottom-right of the canvas, which at 390 px are the same corner. The
     controls sit a row higher below `sm`.
+
+11. **A dropped database connection killed the dev server.** Found the hard
+    way: two full e2e runs destroyed by a transient
+    `getaddrinfo ENOTFOUND …neon.tech`, each surfacing as
+    `uncaughtException: Connection terminated unexpectedly` and failing every
+    test after it. Neither pool had an `error` listener, and `error` is one of
+    Node's special-cased events — unhandled, it is rethrown as an
+    uncaughtException rather than ignored. The pool recovers from a dead idle
+    client on its own; it just needed permission not to die first. ADR-033.
+
+    Strictly outside Phase 4, and fixed anyway, for two reasons: it was
+    preventing the suite from being verified at all, and the same blip during a
+    live demo would have ended the demo.
 
 ---
 
@@ -318,14 +349,34 @@ Two dots 6 cm apart on a 90-metre floor are the same pixel at fit-to-floor zoom,
 so the plan has been drawing them on top of each other for two phases and nobody
 could see it. Two solid desks 6 cm apart are unmistakable.
 
-This affects **where a desk is drawn, not whether it is real**: all 141 exist, all
-are bookable, every constraint holds, and the count of 141 is confirmed three
-independent ways. It is written up as **A24**, and the fix is fifteen minutes in
-`/admin/floor-plan` with somebody who knows the floor — which is exactly what
-ADR-017 built the editor and the export for. Deliberately *not* fixed by nudging
-geometry in the renderer: a desk drawn where it is not is a data problem, and
-hiding it in one view would leave the plan, the list and Phase 5's analytics
-still wrong.
+**The overlap set maps exactly onto the interpolated set**, which is the
+difference between a bounded defect and a reason to distrust the pipeline:
+
+| | |
+|---|---|
+| pairs closer than 1.30 m | **15** |
+| detected + interpolated | 11 |
+| interpolated + interpolated | 4 |
+| **detected + detected** | **0** |
+| closest detected-to-detected pair | **1.357 m** — clear of a desk |
+
+All eleven inferred anchors collide; none of the 130 detected anchors collides
+with another detected one. The eight detected desks that appear in those pairs
+are victims, not causes. **Detection is sound and needs no re-examination before
+Phase 5.**
+
+This affects **where a desk is drawn, not whether it is real**: all 141 exist,
+all are bookable, every constraint holds, and the count of 141 is confirmed three
+independent ways. It is **visual and interaction, not numerical** — seat identity
+and occupancy are untouched, so unlike A1 and A16 it does not gate the analytics.
+It does gate the demo, because two desks at one pixel resolve a click
+ambiguously. A pre-demo fix, and ours rather than the client's: fifteen minutes
+in `/admin/floor-plan` with somebody who knows the floor, which is exactly what
+ADR-017 built the editor and the export for.
+
+Deliberately *not* fixed by nudging geometry in the renderer: a desk drawn where
+it is not is a data problem, and hiding it in one view would leave the plan, the
+list and Phase 5's analytics still wrong.
 
 ---
 
@@ -378,13 +429,39 @@ core and the meeting-room walls all register on the drawing.
   triangles and fps every frame and costs a few property reads. If a future
   change pushes draw calls up, the e2e catches it; if the probe is removed,
   nothing does.
+- **The dev server dies on a lost database connection, and that is a demo risk.**
+  A transient DNS failure to Neon mid-suite (`getaddrinfo ENOTFOUND
+  ep-empty-hall-…neon.tech`) surfaced as `uncaughtException: Connection
+  terminated unexpectedly` from the `pg` pool, taking the whole server down and
+  failing every test after it. The network blip was external and not a defect,
+  but an unhandled `error` event on a pooled client is: a hotel wifi hiccup
+  during the demo would do the same thing. `src/lib/db/index.ts` wants a pool
+  `error` handler. Out of Phase 4's scope, deliberately not widened into it, but
+  it should be fixed before anyone stands up in front of the client.
 - **A24 is the one that needs CBVA in the room.** Eleven desks, fifteen minutes
   in the editor, and the export writes them back to `seats.json` as a reviewable
   diff. Worth doing before the analytics screen makes desk-level claims.
+- **Do not raise the adaptive DPR ceiling back to 2.** It is 1.5 because it was
+  measured (§6), and the counterintuitive part is worth keeping: recovered
+  headroom gets spent on resolution, so filtering to one wing — which sheds a
+  third of the triangles — can leave the view *slower* than the unfiltered one.
+  Somebody will otherwise see a scene running comfortably and try to buy sharpness
+  with the slack.
 - **Do not let `three` leak upward.** Nothing above
   `src/components/floor-plan/three/` may import from it. A stray `import type` is
   enough to pull 224 KB gzipped onto every `/floor` load, and nothing will fail —
   the bundle will just quietly get four times bigger.
+- **Weak status legibility at whole-floor zoom is an LOD problem, not a colour
+  problem — and the right answer is probably to stop trying.** Nobody picks a
+  desk from sixty metres up. At that distance the question is "how full is the
+  floor, and which wing is busy", which is a density question; per-seat status is
+  the wrong thing to be rendering at all. Phase 5 should consider zone- or
+  bay-level occupancy at far zoom, switching to per-seat glyphs past a distance
+  threshold. Note the trap already found the hard way: do not chase legibility by
+  scaling the glyph plate up. The atlas cell holds one *centred* glyph, so a
+  bigger plate stretches the glyph with it and every desk becomes a smear — see
+  defect 7. This is also the natural place for the occupancy heat map, and it
+  goes over the same `seats.json` through `three/coords.ts`.
 - **The status panel is the non-colour cue in 3D.** Phase 5's analytics legend
   must keep the same seven-status vocabulary; `SEAT_STATUS_TOKENS` is still the
   only place it is defined, and `three/seat-materials.ts` is a bridge to it, not
