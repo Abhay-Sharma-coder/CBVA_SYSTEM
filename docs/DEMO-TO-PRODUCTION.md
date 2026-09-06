@@ -279,9 +279,49 @@ default; automate it only alongside a backup policy.
 
 ```bash
 npm run typecheck && npm run lint && npm test && npm run build   # all four
-DATABASE_URL_UNPOOLED='<prod direct>' npm run db:migrate          # only if 0004+ exists
-npx vercel deploy --prod
+npm run prod:check                        # FIRST: does production match this code?
+npm run prod:migrate -- --yes-production  # only if prod:check says the schema is behind
+npm run deploy
+npm run prod:check                        # again
 ```
+
+`docs/RUNBOOK.md` is the operating guide and takes precedence over this section.
+
+### Nothing sequenced migrations against deploys, and that is the general problem
+
+**This is the single most important operational finding in the project**, and it
+generalises well past the column it took production down over.
+
+For five phases, `npm run db:migrate` and the deploy were unrelated commands run
+by a person who had to remember the order. That was invisible the whole time
+because **no phase before the sixth added a column.** The first one that did —
+`meeting_rooms.bay_code`, `drizzle/0004` — was applied to the LOCAL database,
+because every database script in this repo defaults to `.env.local`. The deploy
+then promoted code that selects that column, every meeting-room query failed
+with `42703`, and `/rooms` and `/` were down until it was rolled back.
+
+The recovery cost more than the outage: the seed deletes `bookings` and
+`room_bookings` wholesale before regenerating them (ADR-008), so failing between
+the delete and the insert left production with **zero bookings and one meeting
+room** — eight weeks of demo history, rebuilt because a column was missing.
+
+**Why this gets worse, not better, from here.** Production is currently a demo
+with an invented roster. The moment CBVA's HR list arrives (A1), every one of
+these lands as a schema or data change against a database that holds real
+people: grades, allocated seats, room names, Outlook mailbox addresses, the
+holiday circular. Each is a migration; each is an opportunity to run exactly
+this sequence in exactly the wrong order.
+
+**What Phase 7 did about it.** `prod:check` now compares
+`drizzle.__drizzle_migrations` against `drizzle/meta/_journal.json` and **fails,
+non-zero**, naming any migration the code carries and production has not
+applied. It runs before the deploy as well as after. That converts the trap from
+"a step somebody has to remember" into "a gate that says no".
+
+**What it does not do, and should.** It is still a gate a person has to run.
+The durable fix is a release step that migrates and deploys as one operation,
+which needs the CI that item 8 above says does not exist. Until then the order in
+the runbook is load-bearing and `prod:check` is what enforces it.
 
 ---
 

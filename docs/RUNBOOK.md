@@ -104,15 +104,40 @@ target : ep-bold-dream-b36xsna6.c-4.ap-southeast-1.aws.neon.tech
 db     : neondb
 mode   : APP_MODE=demo
 
- users 141 · seats 141 · bookable 93 · bookings 5805
+ users 141 · seats 141 · bookable 93 · bookings 5805 · meeting_rooms 5
  live_releases 12 · series 1 · clock_offset 0 · queued_mail 0
+migrations: 5/5 applied
 
 looks presentable.
 ```
 
-It warns on the four things that actually go wrong: a non-zero clock offset,
-a seat or user count that is not 141 (test debris), and a backlog of queued mail
-(the cron has stopped).
+**It exits non-zero on a FAILURE, so it can gate a deploy.** Until Phase 7 it
+always exited 0 and asserted almost nothing — it selected the bookings count,
+printed it, and reported **"looks presentable" against three bookings**, which
+is exactly the damage the Phase 6 deploy caused. A guard that greenlights the
+failure it exists to catch is worse than no guard, because it also supplies a
+reason not to look.
+
+**Failures — these block, and each one has happened:**
+
+| | |
+|---|---|
+| **A migration on disk that production has not applied** | The cause of the Phase 6 outage, and the only one that is a live failure rather than a presentation problem. `db:migrate` reads `.env.local`, so it migrates the LOCAL database; the deploy then promotes code selecting a column production was never given. |
+| Fewer than 2,000 bookings | The demo history is gone. What an interrupted seed leaves behind. |
+| Meeting rooms ≠ 5 | The seed deletes rooms before inserting; a partial run left production with one. |
+| Seats or users ≠ 141 | Test debris. |
+| No bookable seats at all | Nobody could book anything. |
+
+**Warnings — these do not block:** a non-zero clock offset, a backlog of queued
+mail, no live releases or recurring series, and production being *ahead* of this
+checkout (you are probably on an older branch).
+
+The judgement lives in `scripts/prod-check.mjs` as a pure function, and
+`tests/unit/prod-check.test.ts` feeds it the three damaged shapes the incident
+actually produced. It was also **demonstrated failing end to end** against a
+throwaway database seeded and then damaged three ways — see PHASE-7-HANDOFF.
+`node scripts/prod.mjs check --scratch-url=…` is how that is re-run; it is
+accepted by `check` only, which performs no writes.
 
 ---
 
@@ -153,10 +178,16 @@ a shell, `prod:check` will tell you if it is non-zero.
 
 ```bash
 npm run typecheck && npm run lint && npm test && npm run build   # all four
-npm run prod:migrate -- --yes-production                          # only if a new drizzle/*.sql exists
+npm run prod:check                        # FIRST: does production match this code?
+npm run prod:migrate -- --yes-production  # only if prod:check says the schema is behind
 npm run deploy
-npm run prod:check
+npm run prod:check                        # again: did the deploy leave it healthy?
 ```
+
+**`prod:check` goes FIRST now, not only last.** It reports whether production
+has every migration this checkout carries, which is the question the Phase 6
+deploy did not ask and could not answer. Deploying while it says `<- BEHIND`
+is the outage, reproduced.
 
 **Migrations are not wired into the build** — there is no `vercel-build` or
 `postinstall` hook, so a schema change is a deliberate step. That is the safe
