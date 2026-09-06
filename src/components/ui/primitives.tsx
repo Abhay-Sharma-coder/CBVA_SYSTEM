@@ -80,9 +80,12 @@ const badgeVariants = cva(
       variant: {
         neutral: "border-hairline bg-surface-sunken text-ink-muted",
         navy: "border-navy/25 bg-navy-tint text-navy",
-        positive: "border-positive/30 bg-positive/8 text-positive",
-        caution: "border-caution/30 bg-caution/8 text-caution",
-        danger: "border-danger/30 bg-danger/8 text-danger",
+        /* Opaque tints, not `bg-caution/8`. A translucent badge borrows its
+           contrast from whatever is behind it, which is how a "queued" badge
+           on a selected row came out at 3.99:1. See globals.css. */
+        positive: "border-positive/30 bg-tint-positive text-positive",
+        caution: "border-caution/30 bg-tint-caution text-caution",
+        danger: "border-danger/30 bg-tint-danger text-danger",
         /** Accent. One per screen, on the single most important number. */
         gold: "border-gold bg-transparent text-caution",
       },
@@ -396,9 +399,9 @@ export function StatusMessage({
   className?: string;
 }) {
   const styles: Record<string, string> = {
-    positive: "border-positive/30 bg-positive/8 text-positive",
-    danger: "border-danger/30 bg-danger/8 text-danger",
-    caution: "border-caution/30 bg-caution/8 text-caution",
+    positive: "border-positive/30 bg-tint-positive text-positive",
+    danger: "border-danger/30 bg-tint-danger text-danger",
+    caution: "border-caution/30 bg-tint-caution text-caution",
     neutral: "border-hairline bg-surface-sunken text-ink-muted",
   };
   return (

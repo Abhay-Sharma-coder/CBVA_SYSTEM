@@ -40,6 +40,17 @@
   --cbva-caution: #8a6414;
   --cbva-danger: #8f2f2a;
 
+  /* Status tints, baked OPAQUE against paper.
+     These were `bg-caution/8` and friends, which is a translucent fill — so the
+     contrast of the text on top depended on whatever happened to be behind the
+     badge. On a plain row that is fine; on a SELECTED row (bg-navy-tint) a
+     "queued" badge measured 3.99:1, under AA. A badge has to carry its own
+     background, or its contrast is a property of its surroundings.
+     Composited here: caution 4.63:1, positive 5.41:1, danger 6.79:1. */
+  --cbva-tint-positive: color-mix(in srgb, var(--cbva-positive) 8%, var(--cbva-paper));
+  --cbva-tint-caution: color-mix(in srgb, var(--cbva-caution) 8%, var(--cbva-paper));
+  --cbva-tint-danger: color-mix(in srgb, var(--cbva-danger) 8%, var(--cbva-paper));
+
   /* ---- seat status. Colour is the SECONDARY cue everywhere; the primary cue
          is the border treatment + glyph carried by SeatSwatch. ---- */
   --seat-available-fill: var(--cbva-paper);
@@ -118,6 +129,9 @@
   --color-positive: var(--cbva-positive);
   --color-caution: var(--cbva-caution);
   --color-danger: var(--cbva-danger);
+  --color-tint-positive: var(--cbva-tint-positive);
+  --color-tint-caution: var(--cbva-tint-caution);
+  --color-tint-danger: var(--cbva-tint-danger);
 
   --color-chart-1: var(--cbva-chart-1);
   --color-chart-2: var(--cbva-chart-2);
