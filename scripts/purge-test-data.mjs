@@ -18,7 +18,17 @@
  *   node scripts/purge-test-data.mjs
  */
 import { config } from "dotenv";
-config({ path: ".env.local", quiet: true });
+/**
+ * Which env file to load.
+ *
+ * Defaults to `.env.local` (the LOCAL / test database). Set ENV_FILE to point
+ * at another — `scripts/prod.mjs` sets it to `.env.production.local` so the
+ * same script can be aimed at the deployed database without editing anything.
+ *
+ * dotenv does not override variables already in the environment, so an
+ * explicitly exported DATABASE_URL still wins over both files.
+ */
+config({ path: process.env.ENV_FILE ?? ".env.local", quiet: true });
 import pg from "pg";
 
 const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;

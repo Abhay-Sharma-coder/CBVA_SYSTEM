@@ -19,7 +19,12 @@
     "e2e": "playwright test",
     "db:backfill-slots": "tsx scripts/backfill-slot-bounds.ts",
     "jobs:run": "tsx scripts/run-jobs.ts",
-    "db:purge-test-data": "node scripts/purge-test-data.mjs"
+    "db:purge-test-data": "node scripts/purge-test-data.mjs",
+    "prod:check": "node scripts/prod.mjs check",
+    "prod:migrate": "node scripts/prod.mjs migrate",
+    "prod:seed": "node scripts/prod.mjs seed",
+    "prod:jobs": "node scripts/prod.mjs jobs",
+    "deploy": "vercel deploy --prod"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

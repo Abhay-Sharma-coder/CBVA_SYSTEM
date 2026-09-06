@@ -368,6 +368,33 @@ Neon Postgres 18, ap-southeast-1. **Two connection strings, both required:**
   transaction pooling breaks DDL sequencing and makes the two-parallel-transaction
   constraint tests non-deterministic.
 
+### TWO DATABASES. Know which one you are about to touch.
+
+| | Neon project | Env file | Used by |
+|---|---|---|---|
+| **Production** — the live demo | `ep-bold-dream-b36xsna6` (c-4) | `.env.production.local` | Vercel only |
+| **Local** — dev and tests | `ep-empty-hall-az0hv77p` (c-3) | `.env.local` | `npm run dev`, `npm test`, `npm run e2e` |
+
+Separate on purpose: the suites mutate demo data deliberately, so sharing one
+would mean a local test run changing what a partner is looking at on
+https://cbva-workspace.vercel.app.
+
+**Every database script defaults to `.env.local`.** Production is a different
+VERB, never a different variable — `scripts/prod.mjs` prints the host it is
+about to touch, refuses without `--yes-production`, and refuses outright if the
+host looks like the local database:
+
+```
+npm run prod:check                        # read-only. Run this first, always.
+npm run prod:migrate -- --yes-production
+npm run prod:seed    -- --yes-production  # rebuild the demo history
+npm run deploy
+```
+
+Credentials live in `.env.production.local` (gitignored; `npx vercel env pull`
+recovers them). **`docs/RUNBOOK.md` is the operating guide** — read it before
+touching production, and after any interrupted test run.
+
 **Two rules are enforced by the database, not the app** — see
 `drizzle/0001_constraints.sql`. Do not add an app-level pre-check for either;
 that reintroduces the race window they exist to close.

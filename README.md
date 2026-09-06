@@ -73,6 +73,12 @@ npm run jobs:run         # auto-release, series, notifications, calendar retry �
 npm run db:purge-test-data  # remove fixtures an interrupted test run left behind
 
 npm run build:floorplan  # re-read the architect's PDF; outputs are committed
+
+# The DEPLOYED demo. These target a different database — see docs/RUNBOOK.md.
+npm run prod:check                        # read-only health check. Safe.
+npm run prod:migrate -- --yes-production
+npm run prod:seed    -- --yes-production
+npm run deploy                            # vercel deploy --prod
 ```
 
 > **The e2e suite mutates demo data on purpose** — the walkthrough books,
@@ -95,6 +101,7 @@ Read in this order.
 |---|---|
 | **[CLAUDE.md](CLAUDE.md)** | **Read first.** The stack, and the six rules that hold the design together — the clock rule, the slot rule, the write rules, the notification rule, the adapter rules, the floor-plan rules. |
 | **[docs/PROJECT.md](docs/PROJECT.md)** | The living spec: what the product *is*. |
+| **[docs/RUNBOOK.md](docs/RUNBOOK.md)** | **Operating the live demo.** Which database is which, where the credentials are, how to seed production safely, and what breaks it. Read before touching production. |
 | **[docs/PHASE-5-HANDOFF.md](docs/PHASE-5-HANDOFF.md)** | What exists today, what it cost, and every defect found on the way. |
 | **[docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md)** | **The client-facing list.** Everything we assumed, and what changes if the answer differs. Send this one. |
 | **[docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md)** | A ten-minute walkthrough for whoever presents it, including what to say about each open question. |
@@ -145,14 +152,24 @@ breaking it produced a real bug at some point:
 
 ## Deployment
 
-Vercel, with Neon Postgres. Two databases: the deployment has its own project,
-and local development and the test suites use another — the suites mutate demo
-data deliberately, so sharing one would mean a test run changing what somebody
-is looking at.
+Vercel, with Neon Postgres. **Two databases**: the deployment has its own
+project (`ep-bold-dream-b36xsna6`), and local development and the test suites
+use another (`ep-empty-hall-az0hv77p`) — the suites mutate demo data
+deliberately, so sharing one would mean a test run changing what somebody is
+looking at on the live URL.
 
-Full detail, including the environment variables and what must be set before the
-QR sheet is printed, is in
-**[docs/DEMO-TO-PRODUCTION.md](docs/DEMO-TO-PRODUCTION.md) §9**.
+The deployed database's credentials are in `.env.production.local`, which is
+**not committed**. Recover it with `npx vercel env pull` if it is missing.
+
+```bash
+npm run prod:check                        # which database, and is it presentable
+npm run prod:seed -- --yes-production     # rebuild the demo history
+npm run deploy
+```
+
+**[docs/RUNBOOK.md](docs/RUNBOOK.md)** is the operating guide — read it before
+touching production. Going live for real is
+**[docs/DEMO-TO-PRODUCTION.md](docs/DEMO-TO-PRODUCTION.md)**.
 
 ---
 
