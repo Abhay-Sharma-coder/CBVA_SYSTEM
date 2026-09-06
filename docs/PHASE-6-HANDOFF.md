@@ -271,52 +271,79 @@ between A1 and A2 is still ours.
 
 ---
 
-## 9 · ⚠️ DEPLOYMENT IS BLOCKED, and the live site is on the PREVIOUS build
+## 9 · Deployment — it broke production once, and what that cost
 
-**Status: deployed, broken, rolled back. `https://cbva-workspace.vercel.app` is
-serving the pre-Phase-6 build and is healthy.**
+**Now live and verified.** `https://cbva-workspace.vercel.app` serves Phase 6:
+141 seats, the room labels on the plan, five meeting rooms with their bay codes,
+5,804 bookings. Every route 200.
 
-Migration `0004_room_bay_code.sql` adds `meeting_rooms.bay_code`. Drizzle then
-selects that column on every meeting-room query. I applied the migration with
-`npm run db:migrate`, which reads `DATABASE_URL_UNPOOLED` from `.env.local` —
-and **that is not the database Vercel talks to.** The deploy went out, and every
-request touching `meeting_rooms` failed:
+It did not go smoothly, and the failure is the useful part.
+
+**What happened.** Migration `0004_room_bay_code.sql` adds
+`meeting_rooms.bay_code`, and drizzle then selects that column on every
+meeting-room query. `npm run db:migrate` reads `.env.local`, which is the LOCAL
+database — **production never received the column.** The deploy promoted code
+that selects it and every meeting-room query failed:
 
 ```
 error: column "bay_code" does not exist   (42703)
-  select "id", "floor_id", "name", "bay_code", … from "meeting_rooms"
 ```
 
-`/rooms` and `/` were broken for about three minutes. Rolled back to
-`cbva-workspace-i7w2rb3k1`, verified healthy, and `/api/rooms` is serving the
-old six rooms again.
+`/rooms` and `/` were down for about three minutes before I rolled back to the
+previous deployment and verified it healthy.
 
-**Why I could not simply fix it forward.** The production `DATABASE_URL` and
-`DATABASE_URL_UNPOOLED` are stored on Vercel as **Secret**, and
-`vercel env pull` refuses to emit secret values. I cannot reach that database to
-run the migration.
+**What it cost, which was more than the outage.** The seed deletes `bookings`
+and `room_bookings` wholesale before regenerating them (ADR-008), and it deletes
+meeting rooms no longer in `MEETING_ROOMS`. Failing between the delete and the
+insert left production with **0 bookings and ONE meeting room.** Seats, people,
+releases and the recurring series survived. `npm run prod:seed` restored all of
+it — 5,804 bookings, 5 rooms — but that is eight weeks of demo history rebuilt
+because a column was missing.
 
-**What has to happen before this ships, in this order:**
+**The recovery, for the next person:**
 
-1. Apply `drizzle/0004_room_bay_code.sql` to the **production** database. It is
-   `ALTER TABLE meeting_rooms ADD COLUMN IF NOT EXISTS bay_code text` — additive,
-   nullable, and safe to run on a live table. Either
-   `DATABASE_URL_UNPOOLED=<prod> npm run db:migrate` from a machine that has the
-   secret, or run the SQL in the Neon console.
-2. Re-seed, so the five rooms replace the six. The seed deletes rooms no longer
-   in `MEETING_ROOMS`, and it deletes all `room_bookings` first, so it is safe —
-   but it *is* destructive to demo booking history, which is the point of a
-   re-seed.
-3. `npx vercel --prod --scope <team>`.
-4. Check `GET /api/rooms?date=<a working day>` returns five rooms with bay codes.
+```bash
+npm run prod:check                        # read-only, always first
+npm run prod:migrate -- --yes-production
+npm run prod:seed    -- --yes-production
+npm run prod:check                        # expect ~5,800 bookings
+npm run deploy
+```
 
-**The general lesson, which is bigger than this column.** Nothing in this
-project sequences a migration against a deploy. `vercel.json` has a cron and no
-build command that migrates; `npm run db:migrate` is a thing a human remembers.
-That worked for five phases because no phase before this one added a column.
-The first one that did took the site down. **Any future schema change needs the
-migration applied to the production database BEFORE the code that reads the new
-column is promoted** — or a release step that does it, which is the real fix.
+**Two corrections to the first diagnosis**, because both changed the fix:
+
+1. It was recorded that `bay_code` was "not in `src/lib/db/schema.ts` and not in
+   any migration". It was in both — `schema.ts:274` and
+   `drizzle/0004_room_bay_code.sql`, journalled and committed in `6049e63`. The
+   fault was one unapplied migration, not missing code.
+2. The **local** database was never damaged. It reports five meeting rooms
+   because five is correct after Phase 6, and it has held 5,804 bookings
+   throughout. `npm run seed` completes cleanly and is idempotent across two
+   consecutive runs.
+
+**Three smaller things found on the way, all fixed:**
+
+- `npm run deploy` ran bare `vercel`, which is not on PATH — the CLI is a
+  devDependency. Now `npx vercel`.
+- After a `vercel rollback`, production deploys stop auto-promoting to the
+  alias. The deploy reports success and the live URL keeps serving the old
+  build. It needs an explicit `vercel promote`, which is not obvious and looks
+  exactly like a caching problem.
+- `bay_code` was write-only: seeded, stored, and read by nothing. `RoomGrid` now
+  carries it and `/rooms` shows the tag beside the capacity, so the join the
+  column exists for is real on both screens.
+
+**The lesson, which is bigger than one column.** Nothing in this project
+sequences a migration against a deploy. That was invisible for five phases
+because none of them added a column; the first one that did took the site down
+and cost the demo history. `npm run prod:migrate` exists now and comes before
+`npm run deploy` in the runbook — but it is still a step somebody has to
+remember, and the durable fix is a release step that does it.
+
+**One gap left open deliberately.** `prod:check` warns on seat and user counts,
+clock offset and queued mail, but **not on a near-empty `bookings` table** —
+the exact damage that occurred. It reported "looks presentable" against three
+bookings. It wants a threshold.
 
 ---
 
