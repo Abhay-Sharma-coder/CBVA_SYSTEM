@@ -38,12 +38,40 @@ function python(): string {
   throw new Error("no python interpreter on PATH — needed to read the CAD PDF");
 }
 
+const PY_SCRIPT = path.join(ROOT, "tools", "cad", "build_floorplan.py");
+
+/**
+ * The audit runs FIRST and its exit status is the build's.
+ *
+ * It asserts five things that can each go wrong without producing any visible
+ * error: the exact count of paths the legend-swatch EXCLUDE boxes remove, that
+ * no wall-class geometry is among them, that all eleven embedded bitmaps are
+ * present, that no CAD layer is switched off in the PDF's own default view,
+ * and that the plan mask still floods to the same interior coverage.
+ *
+ * The exact count is the load-bearing one and it is exact on purpose. An
+ * earlier, over-wide set of EXCLUDE boxes deleted 4,650 paths of real building
+ * geometry, and every individual path in that region was small -- so a
+ * per-path size threshold could not have caught the very bug it was written
+ * for. Volume was the only signal that worked.
+ */
+function audit() {
+  const bin = python();
+  const run = spawnSync(bin, [PY_SCRIPT, "--audit"], { stdio: "inherit" });
+  if (run.status !== 0) {
+    throw new Error(
+      `CAD audit failed (exit ${run.status}). The extractor has silently lost ` +
+        `content, or a constant needs re-verifying against the PDF. Nothing ` +
+        `was written.`,
+    );
+  }
+}
+
 function extract() {
   const bin = python();
-  const script = path.join(ROOT, "tools", "cad", "build_floorplan.py");
-  const run = spawnSync(bin, [script], { stdio: "inherit" });
+  const run = spawnSync(bin, [PY_SCRIPT], { stdio: "inherit" });
   if (run.status !== 0) {
-    throw new Error(`${bin} ${script} exited ${run.status}`);
+    throw new Error(`${bin} ${PY_SCRIPT} exited ${run.status}`);
   }
 }
 
@@ -88,13 +116,37 @@ function decollide() {
   }
 }
 
+/**
+ * ONE SVG PER WIDTH, and the pairing is checked rather than trusted.
+ *
+ * A PDF stroke width of 0 means "one device pixel", and 49,196 of this
+ * drawing's 79,827 in-plan paths are zero-width -- 62% of the linework. The
+ * correct SVG stroke for those is therefore PLAN_WIDTH / target_pixels: 0.627
+ * at 2048 and 0.314 at 4096. There is no single value that is right at both.
+ *
+ * Until Phase 7 one SVG was rasterised at both widths, so one of the two
+ * textures was always wrong -- silently too faint or too bold, which looks
+ * like a rendering preference rather than a defect. Each SVG now carries the
+ * width it was generated for and this refuses to bake a mismatch.
+ */
 async function rasterise() {
-  const svgPath = path.join(DATA, "plan-texture.svg");
-  if (!existsSync(svgPath)) throw new Error(`missing ${svgPath}`);
-  const svg = readFileSync(svgPath);
   mkdirSync(PUBLIC, { recursive: true });
 
   for (const width of TEXTURE_WIDTHS) {
+    const svgPath = path.join(DATA, `plan-texture-${width}.svg`);
+    if (!existsSync(svgPath)) throw new Error(`missing ${svgPath}`);
+    const svg = readFileSync(svgPath);
+
+    const stamped = /data-raster-width="(\d+)"/.exec(svg.subarray(0, 512).toString());
+    if (!stamped || Number(stamped[1]) !== width) {
+      throw new Error(
+        `${path.basename(svgPath)} was generated for raster width ` +
+          `${stamped ? stamped[1] : "unknown"}, not ${width}. Baking it here ` +
+          `would produce a texture whose hairlines are wrong at every ` +
+          `pixel -- see tools/cad/texture.py hairline_for().`,
+      );
+    }
+
     const dest = path.join(PUBLIC, `plan-texture-${width}.webp`);
     // density scales librsvg's rasterisation of the source viewBox; without it
     // sharp renders at 72dpi and then upsamples, which smears the hairlines
@@ -106,10 +158,10 @@ async function rasterise() {
       .toFile(dest);
     const kb = statSync(dest).size / 1024;
     console.log(`  ${path.relative(ROOT, dest)}  ${kb.toFixed(0)} KB`);
+    // The intermediates are ~5 MB of CAD linework each and are regenerable;
+    // the webps are what ship.
+    unlinkSync(svgPath);
   }
-  // The intermediate is ~4 MB of CAD linework and is regenerable; the webps
-  // are what ship.
-  unlinkSync(svgPath);
 }
 
 function validate() {
@@ -227,6 +279,7 @@ function validate() {
 }
 
 async function main() {
+  audit();
   extract();
   decollide();
   await rasterise();

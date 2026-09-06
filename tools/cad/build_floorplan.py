@@ -36,6 +36,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cadparse as C  # noqa: E402
 from planmask import PlanMask, wedge_classifier  # noqa: E402
+import texture  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -780,58 +781,6 @@ def build_zones(mask, spans, seats):
 
 
 # --------------------------------------------------------------------------
-# texture
-# --------------------------------------------------------------------------
-
-def write_texture_svg(paths, mask, dest):
-    x0, y0, x1, y1 = C.PLAN_BOX
-    w, h = x1 - x0, y1 - y0
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x0:g} {y0:g} {w:g} {h:g}" '
-        f'width="{w:g}" height="{h:g}">',
-        f'<rect x="{x0:g}" y="{y0:g}" width="{w:g}" height="{h:g}" fill="#FBFAF7"/>',
-    ]
-    groups = [
-        (("F-FURNITURE HATCH",), "#DCD7CE", 0.3),
-        (("LANDSCAPE", "I-GRANITE", "H-HATCH1", "H-HATCH2", "hatch",
-          "AC EXH. GRILL", "I-FLOR-PFIX", "I-WALL-PFIX", "AR- HATCH"),
-         "#D5D0C6", 0.3),
-        (("F-FURNITURE", "F-LOOSE FURNITURE", "I-FURN", "I-FURN-MODU",
-          "F-FURNISHING MATERIAL"), "#C3BDB1", 0.35),
-        (("0", "00"), "#A9A296", 0.4),
-        (("G-GLASS", "W-WINDOW"), "#7C8BA8", 0.6),
-        (("B- BEAM", "K-FLOR-STRS", "K-ELEV", "I-ELEV"), "#B4AEA2", 0.5),
-        (("P-FULLHEIGHT PARTITION", "I-PART-FULL", "I-WALL", "I-DOOR"),
-         "#55618B", 0.6),
-        (("W-WALL", "K-WALL", "C- COLOUMN", "K-COLS", "W-WALL HATCH"),
-         "#1E2A5A", 0.9),
-    ]
-    by_layer = collections.defaultdict(list)
-    for p in paths:
-        by_layer[p.layer].append(p)
-
-    for layers, colour, width in groups:
-        d = []
-        for lay in layers:
-            for p in by_layer.get(lay, ()):
-                for sp in p.subpaths:
-                    if len(sp) < 2 or not mask.keeps(sp):
-                        continue
-                    d.append("M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in sp))
-        if not d:
-            continue
-        parts.append(
-            f'<g fill="none" stroke="{colour}" stroke-width="{width}" '
-            f'stroke-linecap="round" stroke-linejoin="round">'
-            f'<path d="{"".join(d)}"/></g>'
-        )
-    parts.append("</svg>")
-    with open(dest, "w", encoding="utf-8") as fh:
-        fh.write("".join(parts))
-    return os.path.getsize(dest)
-
-
-# --------------------------------------------------------------------------
 # scale
 # --------------------------------------------------------------------------
 
@@ -898,6 +847,16 @@ def main():
     ap.add_argument("--pdf", default=PDF)
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--max-walls", type=int, default=600)
+    ap.add_argument("--palette", choices=["true", "muted"], default="muted",
+                    help="muted pulls the drawing's colours towards the app "
+                         "palette; true is the contractor's sheet verbatim")
+    ap.add_argument("--raster-widths", default="2048,4096",
+                    help="one SVG is written per width, because a PDF stroke "
+                         "width of 0 means one DEVICE PIXEL and 62%% of this "
+                         "drawing is zero-width")
+    ap.add_argument("--audit", action="store_true",
+                    help="verify nothing is silently lost; non-zero exit on "
+                         "failure. Run by npm run build:floorplan.")
     a = ap.parse_args()
 
     with open(a.pdf, "rb") as fh:
@@ -905,14 +864,29 @@ def main():
     checksum = hashlib.sha256(raw).hexdigest()
 
     print(f"reading {os.path.basename(a.pdf)} ...", file=sys.stderr)
-    paths, spans = C.read(raw)
-    print(f"  {len(paths)} paths, {len(spans)} text spans", file=sys.stderr)
-
-    os.makedirs(a.out, exist_ok=True)
+    paths, spans, images = C.read(raw, want_images=True)
+    print(f"  {len(paths)} paths, {len(spans)} text spans, "
+          f"{len(images)} placed bitmaps", file=sys.stderr)
 
     mask = PlanMask(paths)
     print(f"  building interior: {mask.coverage * 100:.1f}% of the plan box",
           file=sys.stderr)
+
+    if a.audit:
+        print()
+        failures = texture.audit(paths, images, mask,
+                                 C.hidden_layers(raw), mask.coverage)
+        if failures:
+            print()
+            print("AUDIT FAILED")
+            for f in failures:
+                print(f"  FAIL: {f}")
+            raise SystemExit(1)
+        print()
+        print("AUDIT PASSED")
+        raise SystemExit(0)
+
+    os.makedirs(a.out, exist_ok=True)
 
     # ---- walls, one chained run per class
     walls = []
@@ -1073,9 +1047,17 @@ def main():
         "bays": report,
     })
 
-    svg = os.path.join(a.out, "plan-texture.svg")
-    size = write_texture_svg(paths, mask, svg)
-    print(f"  texture svg: {size / 1024:.0f} KB", file=sys.stderr)
+    # One SVG per raster width. The hairline stroke IS a function of the
+    # target width -- see texture.hairline_for -- so a single SVG rasterised
+    # at two sizes is wrong at one of them.
+    assets = C.image_assets(raw, texture.visible_images(images, mask))
+    for width in [int(w) for w in a.raster_widths.split(",")]:
+        svg = os.path.join(a.out, f"plan-texture-{width}.svg")
+        size, groups, n_img = texture.write_texture_svg(
+            paths, images, assets, mask, svg, width, a.palette)
+        print(f"  texture svg {width}px: {size / 1024:.0f} KB, "
+              f"{groups} style groups, {n_img} bitmaps, "
+              f"hairline {texture.hairline_for(width)}", file=sys.stderr)
 
     # ---- the honest table
     print()

@@ -50,9 +50,16 @@ next-env.d.ts
 # Phase 2 CAD pipeline scratch
 /tools/cad/__pycache__
 /tools/cad/.cache.pkl
-/src/data/floorplan/plan-texture.svg
+/src/data/floorplan/plan-texture-*.svg
 .check-*.png
 /.tmp
 
 .vercel
 .env*
+
+# Comparison scratch from the Phase 7 texture work. The numeric result is
+# recorded in PHASE-7-HANDOFF; these are a different rasteriser and can never
+# be a byte gate.
+/plan-muted.png
+/plan-true.png
+/.check-*.png

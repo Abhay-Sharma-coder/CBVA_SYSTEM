@@ -19,11 +19,20 @@ Coordinate spaces, in order:
   plan     what everything downstream uses: y DOWN (so it matches SVG and the
            viewBox the Phase 1 assets already carry), cropped to PLAN_BOX
 """
+import base64
+import binascii
 import math
 import re
+import struct
 import zlib
 
 MEDIA_W, MEDIA_H = 1684.0, 1191.0
+
+# Spelled without escape sequences deliberately. These are the only byte
+# literals in the file, and a mangled one is a NUL in the source rather
+# than a visible error.
+FILTER_NONE = bytes(1)                        # PNG scanline filter 0
+PNG_SIG = bytes.fromhex("89504E470D0A1A0A")   # the PNG magic number
 
 # Plan region on the A2 sheet, in plan coordinates (y down). Excludes the
 # title block on the right. Same box the Phase 1 assets were cut to, so the
@@ -52,9 +61,10 @@ def _streams_by_objnum(data):
     return out
 
 
-def page_content(data):
+def page_content(data, streams=None):
     """The /Contents streams, concatenated in declaration order."""
-    streams = _streams_by_objnum(data)
+    if streams is None:
+        streams = _streams_by_objnum(data)
     m = re.search(rb"/Type\s*/Page[^s].{0,4000}?/Contents\s*\[([^\]]*)\]", data, re.S)
     if m:
         nums = [int(n) for n in re.findall(rb"(\d+) 0 R", m.group(1))]
@@ -80,6 +90,31 @@ def layer_names(data):
             if n:
                 out["/" + name.decode()] = n
     return out
+
+
+def hidden_layers(data):
+    """CAD layer names switched OFF in the PDF's default view configuration.
+
+    This extractor draws every layer it is given, so a layer the architect
+    turned off would appear in our texture and in nothing else. Empty on this
+    drawing; audited so it stays that way.
+    """
+    ocg = {}
+    for m in re.finditer(rb"(?:^|\s)(\d+) 0 obj\s*<<([^>]*?)/Type\s*/OCG(.*?)>>",
+                         data, re.S):
+        blk = m.group(2) + m.group(3)
+        nm = re.search(rb"/Name\s*\(([^)]*)\)", blk)
+        if nm:
+            ocg[int(m.group(1))] = nm.group(1).decode("latin1")
+    d = re.search(rb"/OCProperties\s*<<.*?/D\s*<<(.*?)/OCGs", data, re.S)
+    blk = d.group(1) if d else b""
+    off = re.search(rb"/OFF\s*\[([^\]]*)\]", blk)
+    if not off:
+        off = re.search(rb"/OCProperties\s*<<.*?/OFF\s*\[([^\]]*)\]", data, re.S)
+    if not off:
+        return set()
+    return {ocg.get(int(n), "/oc" + n.decode())
+            for n in re.findall(rb"(\d+) 0 R", off.group(1))}
 
 
 def tounicode_cmap(data):
@@ -110,6 +145,156 @@ def tounicode_cmap(data):
                 uni[k] = chr(dst + k - lo)
     return uni
 
+
+def xobject_map(data):
+    """'/XopN' -> object number, from the page /Resources /XObject dict."""
+    m = re.search(rb"/XObject\s*<<(.*?)>>", data, re.S)
+    if not m:
+        return {}
+    return {"/" + n.decode(): int(num)
+            for n, num in re.findall(rb"/(\w+)\s+(\d+) 0 R", m.group(1))}
+
+
+def _obj_head(data, num):
+    """The dictionary text of object `num`, up to its stream keyword."""
+    pat = rb"(?:^|\s)" + str(num).encode() + rb" 0 obj(.*?)endobj"
+    m = re.search(pat, data, re.S)
+    if not m:
+        return b""
+    body = m.group(1)
+    cut = body.find(b"stream")
+    return body[:cut] if cut >= 0 else body
+
+
+def _grey_png(samples, width, height):
+    """An 8-bit greyscale PNG from raw samples. Stdlib only.
+
+    Used for the soft-mask channel. Writing a PNG by hand is a dozen lines and
+    it is what removes the need for a JPEG decoder: the colour image goes into
+    the SVG as its own untouched JPEG and this rides alongside it as an SVG
+    <mask>, so the compositing a pixel renderer would do happens at render
+    time instead.
+    """
+    if len(samples) < width * height:
+        raise ValueError(f"soft mask short: {len(samples)} < {width * height}")
+    raw = bytearray()
+    for row in range(height):
+        raw += FILTER_NONE                       # PNG scanline filter type 0
+        raw += samples[row * width:(row + 1) * width]
+
+    def chunk(tag, payload):
+        return (struct.pack(">I", len(payload)) + tag + payload
+                + struct.pack(">I", binascii.crc32(tag + payload) & 0xFFFFFFFF))
+
+    return (PNG_SIG
+            + chunk(b"IHDR",
+                    struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+def _filters(head):
+    return [f.decode() for f in re.findall(rb"/(\w+Decode)", head)]
+
+
+def image_payload(data, streams, num):
+    """One image XObject as (mime, bytes) plus its soft mask, or raise.
+
+    This drawing's eleven in-plan bitmaps -- the solid B.P.G storage credenzas --
+    are `/Filter [/FlateDecode /DCTDecode]` DeviceRGB with a
+    `/Filter [/FlateDecode /ASCII85Decode]` DeviceGray `/SMask`. So one
+    zlib pass leaves untouched JPEG bytes, and one zlib pass plus ASCII85
+    leaves raw luminance. Neither needs a decoder.
+
+    Anything else RAISES rather than returning None. get_drawings()-style
+    vector extraction was structurally incapable of seeing these at all and
+    their absence was completely silent for five phases; a decoder that
+    silently skips an unfamiliar filter would reproduce exactly that.
+    """
+    head = _obj_head(data, num)
+    if b"/Image" not in head:
+        return None
+    width = int(re.search(rb"/Width\s+(\d+)", head).group(1))
+    height = int(re.search(rb"/Height\s+(\d+)", head).group(1))
+    filters = _filters(head)
+    body = streams.get(num)            # _streams_by_objnum already un-Flated
+    if body is None:
+        raise ValueError(f"image xobject {num} has no stream")
+
+    if filters == ["FlateDecode", "DCTDecode"]:
+        mime, payload = "image/jpeg", body
+    elif filters == ["FlateDecode", "ASCII85Decode"]:
+        a85 = b"".join(body.split())
+        if a85.endswith(b"~>"):
+            a85 = a85[:-2]
+        grey = base64.a85decode(a85, adobe=False)
+        mime, payload = "image/png", _grey_png(grey, width, height)
+    else:
+        raise ValueError(
+            f"image xobject {num}: unhandled filter chain {filters!r}. "
+            f"Add a branch rather than skipping it -- a silently dropped "
+            f"bitmap is invisible in the output.")
+
+    smask = re.search(rb"/SMask\s+(\d+) 0 R", head)
+    return {
+        "num": num, "mime": mime, "payload": payload,
+        "width": width, "height": height,
+        "smask": int(smask.group(1)) if smask else None,
+    }
+
+
+def image_assets(data, images):
+    """{objnum: {mime, b64, mask_b64}} for a set of placed images.
+
+    The colour image goes out as its own untouched JPEG and the soft mask as a
+    greyscale PNG beside it, to be used as an SVG <mask>. That pairing is what
+    lets a stdlib extractor composite these correctly: the credenzas are
+    rotated shapes inside axis-aligned bitmaps, so their corners are
+    transparent, and without the mask they composite solid black.
+    """
+    streams = _streams_by_objnum(data)
+    out = {}
+    for im in images:
+        if im.num in out:
+            continue
+        info = image_payload(data, streams, im.num)
+        if info is None:
+            raise ValueError(f"xobject {im.num} was placed by Do but is not an image")
+        rec = {"mime": info["mime"],
+               "b64": base64.b64encode(info["payload"]).decode("ascii")}
+        if info["smask"] is not None:
+            m = image_payload(data, streams, info["smask"])
+            if m is None or m["mime"] != "image/png":
+                raise ValueError(f"soft mask {info['smask']} did not decode to a PNG")
+            rec["mask_b64"] = base64.b64encode(m["payload"]).decode("ascii")
+        out[im.num] = rec
+    return out
+
+
+class Image:
+    """One placed raster image. `quad` is its four corners in PLAN space.
+
+    A PDF image occupies the unit square under the CTM, so the placement is the
+    CTM applied to (0,0) (1,0) (1,1) (0,1) -- which also means a rotated
+    placement is recoverable rather than being flattened to a bounding box.
+    """
+
+    __slots__ = ("layer", "ctm", "num", "quad")
+
+    def __init__(self, layer, ctm, num):
+        self.layer = layer
+        self.ctm = ctm
+        self.num = num
+        self.quad = [to_plan(*apply(ctm, x, y))
+                     for x, y in ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))]
+
+    def bbox(self):
+        xs = [p[0] for p in self.quad]
+        ys = [p[1] for p in self.quad]
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    def axis_aligned(self, tol=1e-6):
+        return abs(self.ctm[1]) < tol and abs(self.ctm[2]) < tol
 
 # --------------------------------------------------------------------------
 # tokenizer
@@ -231,6 +416,18 @@ def scale_of(m):
     return math.hypot(m[0], m[1]), math.hypot(m[2], m[3])
 
 
+def scale_factor(m):
+    """The scalar a stroke width is multiplied by under this matrix.
+
+    PDF strokes are transformed by the CTM, so a width is only meaningful once
+    the matrix is applied. sqrt(|det|) is the right scalar for a possibly
+    non-uniform matrix; here the plot matrix is a uniform 0.03, which is what
+    turns the content stream's 5/9/12/19/24/28/47 into the drawing's
+    0.15/0.27/0.36/0.57/0.72/0.84/1.41 pt line weights.
+    """
+    return math.sqrt(abs(m[0] * m[3] - m[1] * m[2]))
+
+
 def to_plan(x, y):
     """PDF user space (y up) -> plan space (y down)."""
     return (x, MEDIA_H - y)
@@ -256,15 +453,23 @@ class Path:
     5,012 orange hatch paths that are not walls at all. Without the colour
     those two are indistinguishable; with it the layer separates cleanly.
 
-    Every colour in this file is a plain 3-operand DeviceRGB `RG`/`rg`: there
-    is not one `sc`, `scn`, `SCN`, `g`, `G`, `k` or `K` operator in the whole
-    content stream, which is why three lines of tracking is enough.
+    Every colour in this file is set by a plain 3-operand DeviceRGB `RG`/`rg`:
+    there is not one `sc`, `scn`, `SC`, `SCN`, `g`, `G`, `k` or `K` operator in
+    the whole content stream, which is why three lines of tracking is enough.
+
+    Corrected in Phase 7: there ARE 192 `CS` operators, which ADR-042 and an
+    earlier version of this docstring both omitted from that list. `CS` only
+    SELECTS a colour space; with no `SC`/`SCN` anywhere to set a value in it,
+    every colour still comes from `RG`/`rg` and the conclusion is unchanged.
+    The claim as written was simply not literally true.
     """
 
-    __slots__ = ("layer", "ctm", "subpaths", "local", "painted", "stroke", "fill")
+    __slots__ = ("layer", "ctm", "subpaths", "local", "painted", "stroke", "fill",
+                 "width", "join", "even_odd")
 
     def __init__(self, layer, ctm, subpaths, local, painted,
-                 stroke=(0.0, 0.0, 0.0), fill=(0.0, 0.0, 0.0)):
+                 stroke=(0.0, 0.0, 0.0), fill=(0.0, 0.0, 0.0),
+                 width=0.0, join=0, even_odd=False):
         self.layer = layer          # CAD layer name
         self.ctm = ctm              # matrix in force when the path was painted
         self.subpaths = subpaths    # [[(x, y), ...]] in PLAN space
@@ -272,6 +477,13 @@ class Path:
         self.painted = painted      # 'S' stroked / 'f' filled
         self.stroke = stroke        # DeviceRGB 0..1, in force at paint time
         self.fill = fill            # DeviceRGB 0..1, in force at paint time
+        # Presentation state, added in Phase 7 for the baked texture. The
+        # geometry pipeline ignores all three; the texture emitter needs every
+        # one of them, because the drawing carries eight stroke widths and a
+        # mixed miter/round join and flattening either is visible.
+        self.width = width          # stroke width in PLAN units (CTM applied)
+        self.join = join            # 0 miter, 1 round. Only these two occur.
+        self.even_odd = even_odd    # f* / B* / b* rather than f / B / b
 
     def stroke_hex(self):
         return "#%02X%02X%02X" % tuple(
@@ -310,18 +522,30 @@ def _bezier(p0, p1, p2, p3, steps=6):
 
 PAINT_OPS = (b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*", b"n")
 FILL_OPS = (b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*")
+EVEN_ODD_OPS = (b"f*", b"B*", b"b*")
 
 
-def read(data, want_layers=None, want_text=True):
-    """Interpret the page content. Returns (paths, spans)."""
+def read(data, want_layers=None, want_text=True, want_images=False):
+    """Interpret the page content.
+
+    Returns (paths, spans), or (paths, spans, images) with want_images. The
+    third element is opt-in so that every existing two-tuple call site keeps
+    working unchanged.
+    """
     names = layer_names(data)
     uni = tounicode_cmap(data)
-    content = page_content(data)
+    streams = _streams_by_objnum(data)
+    content = page_content(data, streams)
+    xobjects = xobject_map(data) if want_images else {}
 
-    paths, spans = [], []
+    paths, spans, images = [], [], []
     ctm = IDENT
     # PDF's initial colour is black in both channels.
     stroke = fill = (0.0, 0.0, 0.0)
+    # Line width 0 means "one device pixel", which is 62% of this drawing;
+    # resolving it needs the target raster size, so it is left as 0 here and
+    # decided by the texture emitter. Default join is miter, per the spec.
+    lw, join = 0.0, 0
     gstack = []
     oc_stack = []
     layer = None
@@ -333,7 +557,7 @@ def read(data, want_layers=None, want_text=True):
     in_text = False
     font_size = 1.0
 
-    def flush(painted):
+    def flush(painted, even_odd=False):
         nonlocal cur, sub
         if sub and len(sub) > 1:
             cur.append(sub)
@@ -348,7 +572,8 @@ def read(data, want_layers=None, want_text=True):
                         keep = True
                 plan.append(pts)
             if keep:
-                paths.append(Path(layer, ctm, plan, cur, painted, stroke, fill))
+                paths.append(Path(layer, ctm, plan, cur, painted, stroke, fill,
+                                  lw * scale_factor(ctm), join, even_odd))
         cur, sub = [], []
 
     for kind, val in tokenize(content):
@@ -365,10 +590,18 @@ def read(data, want_layers=None, want_text=True):
             # Colour rides the stack WITH the ctm. The drawing sets RG inside
             # nested q/Q blocks, so a bare global would leak one block's colour
             # into the next and mis-attribute paths wholesale.
-            gstack.append((ctm, stroke, fill))
+            gstack.append((ctm, stroke, fill, lw, join))
         elif op == b"Q":
             if gstack:
-                ctm, stroke, fill = gstack.pop()
+                ctm, stroke, fill, lw, join = gstack.pop()
+        elif op == b"w" and operands:
+            nums = [x for x in operands if isinstance(x, float)]
+            if nums:
+                lw = nums[-1]
+        elif op == b"j" and operands:
+            nums = [x for x in operands if isinstance(x, float)]
+            if nums:
+                join = int(nums[-1])
         elif op == b"RG" and len(operands) >= 3:
             nums = [o for o in operands if isinstance(o, float)]
             if len(nums) >= 3:
@@ -435,8 +668,15 @@ def read(data, want_layers=None, want_text=True):
         elif op in PAINT_OPS:
             if op in (b"s", b"b", b"b*") and sub and start:
                 sub.append(start)
-            flush("f" if op in FILL_OPS else "S")
+            flush("f" if op in FILL_OPS else "S", op in EVEN_ODD_OPS)
             start = None
+
+        elif op == b"Do" and want_images:
+            for tok in operands:
+                if isinstance(tok, tuple) and tok[0] == "name":
+                    num = xobjects.get(tok[1].decode())
+                    if num is not None and b"/Image" in _obj_head(data, num):
+                        images.append(Image(layer, ctm, num))
 
         elif op == b"BT":
             in_text, tm = True, IDENT
@@ -467,6 +707,8 @@ def read(data, want_layers=None, want_text=True):
 
         operands = []
 
+    if want_images:
+        return paths, spans, images
     return paths, spans
 
 
