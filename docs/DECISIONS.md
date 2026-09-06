@@ -1229,3 +1229,257 @@ labels, from the same data, so the two cannot drift.
 **Cost.** Nine labels are hard-positioned by the drawing, so a room the drawing
 does not tag gets none. Zone B is labelled from its zone polygon's anchor
 because it carries no tag at all.
+
+---
+
+## ADR-046 — The full-fidelity texture is a stdlib PORT, not an adopted PyMuPDF renderer
+
+**Decision.** The colour-accurate plan texture is emitted by
+`tools/cad/texture.py`, built on the repo's existing stdlib PDF reader
+`cadparse.py`. The PyMuPDF reference implementation that established the
+approach is kept as `tools/cad/reference_render_plan_full.py` and is **not**
+wired into the build.
+
+**What the old texture was throwing away.** `write_texture_svg` flattened every
+path into eight hand-picked greyscale layer groups with one stroke width each.
+That grouping was written to answer "where are the walls", which it does
+correctly, and was then promoted into being the presentation texture, which it
+was never designed for. Measured against the source PDF:
+
+| | in the drawing | kept by the old texture |
+|---|---|---|
+| painted paths | 80,428 (79,827 inside `PLAN_BOX`) | all, but re-coloured |
+| distinct (stroke, fill) combinations | **29** | 1 per layer group |
+| stroke widths | **8** (0.15 … 1.41 pt, plus zero) | 1 per layer group |
+| line joins | 49,257 miter / 30,570 round | all round |
+| filled paths | **149** | 0 — everything `fill="none"` |
+| embedded bitmaps in the plan | **11** | 0, structurally unseen |
+
+The eleven bitmaps are the solid B.P.G storage credenzas. A vector-only
+extractor cannot see them at all, which is why their absence was completely
+silent for five phases rather than being noticed and deferred.
+
+**Why not simply adopt the reference.** Three reasons, in order of weight.
+
+1. **It needs `pip install pymupdf`.** `cadparse.py` exists precisely so that
+   `npm run build:floorplan` works on a clean checkout with no pip step. That
+   property is worth more than the work the reference saves.
+2. **Two parsers reading one PDF is how the texture and the geometry drift
+   apart.** The JSON and the texture would then be two independent readings of
+   the same drawing with no gate comparing them — which is the Phase 6 class of
+   defect, not a new one.
+3. PyMuPDF is AGPL-3.0, inside a client deliverable's build.
+
+**Why the port was affordable, which is the part that decided it.** ADR-042 had
+already put stroke and fill on the `q`/`Q` stack with the CTM, so colour was
+free. That left four small additions — `w`, `j`, even-odd, and image XObjects —
+and only the last looked hard. It is not:
+
+- The bitmaps are `/Filter [/FlateDecode /DCTDecode]`, so **one `zlib` pass
+  leaves untouched JPEG bytes** that go straight into a `data:` URI.
+- Their soft masks are `/Filter [/FlateDecode /ASCII85Decode]` DeviceGray, so
+  `zlib` + `base64.a85decode` gives raw luminance, wrapped into a greyscale PNG
+  by hand in a dozen lines of `zlib` and `binascii.crc32`.
+- That PNG rides alongside the JPEG as an SVG **luminance `<mask>`**, so the
+  compositing a pixel renderer would do happens at render time instead. **No
+  JPEG decoder is needed anywhere.** Verified that sharp's librsvg (2.62.91)
+  composites a `<mask>` over a `data:` URI image correctly before any of this
+  was written.
+
+`cairosvg` is not needed either — `sharp` already rasterises the intermediate.
+
+**The claims were checked, not trusted.** Every headline number above was
+re-derived from the PDF with the stdlib parser before the port began, and the
+audit's two exact constants — 2,492 paths removed by the legend-swatch EXCLUDE
+boxes, 11 in-plan bitmaps — **reproduce exactly** in both implementations. That
+agreement is the evidence the port is faithful.
+
+**Two corrections fell out of doing that.** ADR-042 and `cadparse.py` both said
+there is "not one `sc`, `scn`, `SCN`, `g`, `G`, `k` or `K`" in the content
+stream. There are also **192 `CS` operators**, which that list does not mention.
+With no `SC`/`SCN` anywhere to set a value, colour still comes entirely from
+`RG`/`rg` and the conclusion stands — but the claim as written was not literally
+true, and is corrected in both places. The reference's own `SRC` default also
+names a filename with underscores that does not match the committed PDF.
+
+**One SVG per raster width, and the pairing is checked.** A PDF stroke width of
+0 means one DEVICE pixel, and 49,196 of the 79,827 in-plan paths are zero-width
+— 62% of the linework. The correct SVG stroke is therefore
+`PLAN_WIDTH / target_pixels`: 0.627 at 2048 and 0.314 at 4096. **There is no
+single value that is right at both**, and until now one SVG was rasterised at
+both sizes, so one of the two shipped textures was always wrong — silently too
+faint or too bold, which reads as a rendering preference rather than a defect.
+Each SVG now carries `data-raster-width` and `rasterise()` refuses a mismatch.
+
+**The planmask is kept, and it is the one deliberate difference from the
+reference.** The reference filters by EXCLUDE boxes alone; this also keeps the
+existing `mask.keeps()` interior test, which drops a further **175 paths (0.22%)
+of sheet marks lying outside the building shell**. Measured, and reported rather
+than assumed.
+
+**The audit is the build's first step and its exit status is the build's.** Five
+checks, each guarding something that has gone wrong or could go wrong silently:
+the exact count of paths the EXCLUDE boxes remove, that no wall-class geometry
+is among them, that all eleven bitmaps are present, that no CAD layer is hidden
+in the PDF's own default view, and that the planmask still floods to the same
+interior coverage. It was **demonstrated failing both ways** before being
+trusted — see PHASE-7-HANDOFF.
+
+**Cost.** The audit constants are exact and must be re-verified against the PDF
+if an EXCLUDE box ever changes — which is the point of them being exact, and is
+written on the constants themselves.
+
+---
+
+## ADR-047 — `furniture_type` is not derivable per seat, and the retreat is closed too
+
+**Decision.** Seats carry no `furniture_type`. There is one desk mesh. Neither
+per-anchor nor per-run classification will be attempted again without new input
+from CBVA, and this ADR exists so that decision is findable in six months rather
+than re-litigated from scratch.
+
+**What the drawing's legend states.** 93 rapid-rail workstations and 4
+screen-only workstations, plus 8 foldable tables — 105 furniture units against
+**141 seat positions**. Those two numbers cannot both be per-seat attributes,
+and the reason is visible once stated: **a bench run drawn as one hatched
+desktop is one furniture unit serving nine people.** The hatch describes a
+PROCUREMENT count, not a per-seat attribute.
+
+**Three independent methods, all converging on the wrong number** (Phase 6 §4):
+
+| method | rapid | screen | target |
+|---|---|---|---|
+| bbox clustering + distance threshold, swept 6–20 units | 72–73 | 4–8 | 93 / 4 |
+| bbox clustering, parameter-free nearest region | 78 | 22 | 93 / 4 |
+| **true segment distance ≤ 12 units** (the correct geometry) | **68** | **7** | 93 / 4 |
+
+The second exposed a methodological error worth keeping: clustering **bounding
+boxes** means a hatch line drawn diagonally across a room has a bounding box
+covering the whole room, and `#4A9500` "8 foldable tables" appeared to cover
+half the D wing. The third row is the corrected measurement.
+
+**Why it is structural rather than a tolerance to tune.** **34 of 141 anchors
+have no hatch of any colour within 12 units** — C1 (6), C6 (9), D1 (9), D2 (9),
+D5 (1). These are ordinary workstation bays confirmed by the drawing's own PAX
+annotations, so they must be among the 93, and there is no hatch under them to
+say so. No threshold reaches 93 from 68 without inventing the difference, which
+is fitting a hypothesis to a target — the exact thing the Phase 6 gate existed
+to prevent, and did.
+
+**The obvious retreat is closed too, and that is what is new here.** Phase 6's
+handoff suggested typing at the BAY or RUN level instead, on the grounds that a
+run is what the hatch actually describes. That is true, and it is still not
+cheap: it needs bench runs segmented from the drawing, and **ADR-016 already
+established that desks cannot be segmented from this drawing — only chairs
+can.** So the retreat needs the same missing capability the original attempt
+did. Leaving it recorded as "the obvious next step" without that caveat is an
+invitation to spend a week rediscovering ADR-016.
+
+**What would actually close it.** Not a better probe. Either the furniture
+schedule from the fit-out contractor, which lists units against locations, or
+five minutes from somebody at CBVA marking which bays are rapid-rail. Both are
+input, not inference.
+
+**What was established and is worth keeping.** The colour extraction itself is
+right — it reconciles with the brief's own per-wing path counts exactly, and
+there are exactly four `#0037DD` regions inside the building, each a single
+~25×25-unit workstation footprint. The drawing's "4" is confirmed **as
+regions**. What fails is attributing them to specific seat anchors.
+
+**Cost.** The 3D view draws one desk mesh for all 141 desks, so the three desk
+variants the legend implies are not modelled. Nothing numerical depends on it:
+`furniture_type` would have been descriptive, and no occupancy figure reads it.
+
+---
+
+## ADR-048 — Past a threshold the plan answers a different question, in both views
+
+**Decision.** Below 2D zoom 0.85 (or beyond 70 m in 3D) the floor plan renders
+occupancy **per bay** and paints each seat as a plain dot. Inside the threshold
+it renders the seven per-seat statuses as before. One pure module,
+`src/lib/floor-plan-lod.ts`, holds the thresholds, the hysteresis and the
+aggregation for both renderings.
+
+**Why, and why not "make the chips bigger".** At whole-floor framing a desk is
+about 11px across in 2D and a few pixels in 3D, so the seven-status vocabulary
+is not merely hard to read there — it is unreadable in principle. Nobody picks a
+desk from sixty metres up. The question at that framing is "how full is the
+floor and which wing is busy", which is a **density** question.
+
+Phase 4 recorded exactly this and also recorded the failed attempt to fix it the
+other way: enlarging the glyph plate so the mark reads from further away. The
+atlas cell holds one **centred** glyph, so a bigger plate stretches the glyph
+with it and all 141 desks become smears (Phase 4 defect 7). Two rounds of
+diagnosis went at the colour before the geometry. The plate stays 0.34 m and the
+glyphs are simply **not drawn** at bay detail. A mark that cannot resolve should
+not be drawn larger; it should be replaced by one that answers a question the
+viewer can actually use at that distance.
+
+**The 2D threshold is not a guess.** `plan-canvas` sizes a marker
+`min(34, max(13, scale * 16))`, so below scale **0.8125** the chip is PINNED at
+its 13px floor while the drawing's 23-unit desk pitch keeps shrinking underneath
+it. That is precisely the regime where chips start colliding, and it is where
+the switch belongs. Fit-to-floor measures 0.611 at 1440×900, already inside it.
+
+**Two thresholds, not one.** Enter bay detail below 0.85, leave above 1.00; in
+3D, enter beyond 70 m and leave inside 55 m. A single threshold flickers when a
+settling spring or a damped orbit drifts across it, and a plan flickering
+between two renderings is worse than committing to either. `resolveLod` is pure,
+so the transition is a unit test rather than something to eyeball.
+
+**The 141 seat buttons never leave the DOM.** This is the constraint that shaped
+everything else. All 141 keep their accessible names, their tab order, their
+`data-status` and their hit box at every zoom; only their paint changes, to a
+dot inside the same button. So ADR-032's rule holds — a rendering choice never
+degrades the accessible path — and the three e2e counts that depend on 141 hold
+by construction rather than by luck. The bay layer is `aria-hidden` and
+`pointer-events: none`; it is decoration over a working control surface.
+
+**One colour map, still.** A chip is `--seat-booked-fill` over
+`--seat-available-fill`, the two values a desk already uses, with the count
+printed on it as the non-colour differentiator. **No density ramp entered the
+product.** The `HEAT_STEPS` ramp the analytics uses was deliberately not reached
+for: it belongs to a different surface with a legend beside it, and importing it
+here would give the floor plan a second vocabulary — the exact thing the
+greyscale and colour-vision guarantee on `/styleguide` depends on not happening.
+
+**Normalised by each bay's own capacity.** Phase 5 shipped a bay heat map that
+counted occupied desks without dividing, so every cell saturated to the bay's
+size and the map drew a picture of which bays were biggest. PD has 18 desks and
+D5 has one. The same mistake was available here and the same functions prevent
+it — `countsAsOccupied` and `countsAsCapacity` from `seat-visual-status.ts`.
+Bays with **no** bookable supply are dropped rather than drawn "0/0": that is
+not a low occupancy reading, it is not a question, and eight such plates over
+the drawing made the eleven real ones harder to find.
+
+**Chips are separated, because centroids are where the desks are and not where
+there is room to write.** Four pairs in the C and D wings sat within a chip's
+width of each other, so C5 covered C6 and D2 covered D3 — the layer that exists
+to answer "which wing is busy" hiding the two bays it was answering about. A
+deterministic pairwise separation pass fixes it: sorted input, fixed iteration
+count, no randomness, so the same floor always lays out the same way and a
+screenshot is stable. Displacement is **capped** and a leader line is drawn when
+a chip has moved, because a chip relocated far from its bay is mislabelling the
+floor rather than decluttering it. Measured after: 13 chips, **zero overlapping
+pairs**, none clipped — and that is asserted in `e2e/floor-plan.spec.ts` rather
+than left to the eye.
+
+**In 3D the switch SUBTRACTS from the budget.** The bay plates are one merged
+`BufferGeometry` over one strip atlas — the construction ADR-045 uses for the
+room labels — so thirteen bays cost one draw call, replacing up to six
+per-status glyph instance meshes. Measured: **13 draw calls at whole-floor
+framing against Phase 6's 16**, and 15 on a zone where the glyphs come back.
+Both well inside the budget of 60.
+
+**`window.__cbva3d` carries `lod` and `distance`.** An LOD switch checked only
+by looking at a screenshot is a feature nobody can prove still works. The 3D
+suite already reads that object for draw calls and triangles, so publishing the
+level there makes the transition assertable with the handle that exists.
+
+**Cost.** Two renderings of the same data now exist, and a change to the status
+vocabulary has to be considered against both. That is mitigated by the colour
+rule above — the bay layer reads the same tokens — but it is real. The bay layer
+is also visible-only: what it conveys is available to a screen reader through the
+seats themselves and the list view, which is the same position ADR-032 takes for
+the 3D view, but it does mean the density READING is a sighted convenience
+rather than a second accessible path.

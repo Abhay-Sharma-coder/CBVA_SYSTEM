@@ -8,6 +8,15 @@ file it affects so it can be found and changed when an answer arrives.
 > for somebody who has not read the code. This file stays the engineering
 > record — it names files and keeps the derivations.
 
+**Phase 7 status.** **A11 is CLOSED as a disclosure problem and REOPENED as a
+client question** — Zone C and D no longer carry invented names on screen; the
+question "do wings C and D correspond to specific teams or functions?" goes to
+CBVA instead. **A24 is unchanged in substance and materially easier to close:**
+a `manual` anchor now survives `npm run build:floorplan`, which it did not
+before, so a correction made in the editor is no longer undone by the next
+rebuild. **A29 is new** — the fifth `F-FURNITURE HATCH` colour, now visible in
+the texture. The client trio is still **A1**, **A16** and **A17**.
+
 **Phase 6 status.** **A16 is DOWNGRADED** 🔴→🟠 — the drawing shows Zone B as a
 flexible room, and the headline number no longer waits on it. **A3 is PARTLY
 CLOSED** — five meeting rooms and their capacities now come from the drawing;
@@ -391,19 +400,33 @@ wing is worse than no label at all.
 |---|---|---|---|
 | A | Reception & Cabins | **Boardroom & Meeting Rooms** | the drawing's own A3/A6–A9 tags and PAX |
 | B | Boardroom & Conference | **Flexible Room & Services** | no PAX, no workstation hatch, the castors note, the K/L/M/Q/R rooms |
-| C | Audit Floor | Audit Floor | **none — ours** |
-| D | Tax & Advisory Floor | Tax & Advisory Floor | **none — ours** |
+| C | Audit Floor | **Zone C** | **none — the name was ours, and is gone** |
+| D | Tax & Advisory Floor | **Zone D** | **none — the name was ours, and is gone** |
 
-**C and D are deliberately left alone, and this entry exists so that is a
-choice rather than an oversight.** The drawing labels the wings A–D and never
-says what anybody in them does, so both names are inventions. They are kept
-because they orient a reader, and because replacing them with bare "Zone C" and
-"Zone D" would remove information without removing an unlogged claim — they are
-logged here and in `OPEN-QUESTIONS.md` for CBVA to correct in one line.
+**C and D were NEUTRALISED in Phase 7, reversing the Phase 6 decision.** The
+earlier argument was that a bare "Zone C" removes information without removing
+the claim, and that logging the names here was enough. It was not, for a reason
+that is obvious once stated: **a partner opening the floor plan does not read
+this file.** They read "Audit Floor", and they either believe something untrue
+about their own office or notice it is wrong and start doubting the rest of the
+screen — including the parts that are right, which is most of it. A label nobody
+can audit from the screen it appears on is not orientation, it is an unmarked
+guess.
 
-**The distinction now matters more than it did.** A and B are drawing-derived
-facts; C and D are guesses. Lumping all four together as "labels only", as this
-entry previously did, is what let a wrong one sit unexamined for five phases.
+**So the question goes back to the only people who can answer it**, reworded
+from a disclosure problem into a request, and it is in `OPEN-QUESTIONS.md`:
+
+> **Do wings C and D correspond to specific teams or functions? If so we will
+> label them.**
+
+Nothing is lost by asking. The information was never ours to state, and the
+answer is one line typed into Admin → Settings rather than a deploy.
+
+**A and B keep their names because those are drawing-derived** — A's boardroom
+and four meeting rooms are tagged and PAX-counted on the sheet, and B's zero
+PAX, zero workstation hatch and the castors note make it the flexible room.
+Lumping all four together as "labels only", as this entry did before Phase 6, is
+what let a wrong one sit unexamined for five phases.
 
 ### A12 — Seat types per bay
 
@@ -759,6 +782,28 @@ fifteen minutes with somebody from CBVA who knows the floor, and it is a better
 answer than a cleverer interpolator, because the drawing genuinely does not say
 where these eleven chairs are.
 
+**PHASE 7 FOUND THAT LOOP HALF BROKEN, AND FIXED IT.** A correction survived
+`npm run db:reset`, because the seed reads `seats.json` — and was silently
+DISCARDED by the next `npm run build:floorplan`, which regenerated every anchor
+from the PDF and knew nothing about `manual`. So the one route to closing this
+entry was undone by an ordinary rebuild, with nothing reported. That is the
+Phase 6 trap in its other direction, and it means A24 has been harder to close
+than it looked for two phases.
+
+`build_floorplan.py` now preserves a `manual` anchor verbatim — position,
+rotation and flag — and fails loudly if one exists for a seat code the schedule
+no longer has. Detected and interpolated anchors are still always regenerated,
+because those are the drawing's own answer; a human correction outranks an
+inference, which is the entire point of the editor.
+
+Verified end to end rather than argued: C7-04 moved and marked `manual` survived
+a full rebuild byte for byte, the de-collide relaxed the other eleven around it
+(13 colliding pairs to 0), and it arrived in the database through `npm run seed`.
+
+**So the remaining work is fifteen minutes of somebody's attention, and nothing
+else.** The editor badges all eleven, the export writes them back, the rebuild
+keeps them, and the reseed carries them into the database.
+
 Deliberately **not** fixed by nudging the geometry in the renderer. A desk drawn
 somewhere it is not is a data problem, and hiding it in one view would leave the
 2D plan, the list view and Phase 5's analytics still wrong.
@@ -865,3 +910,27 @@ human behaviour, not a measurement**. The real ratio depends on where the badge
 readers are and whether people habitually scan the sticker in front of them;
 neither is known. The distinction between the two is real; these particular
 numbers are illustrative.
+
+---
+
+### A29 — 🟡 `#B88A00` on `F-FURNITURE HATCH` is 1,148 paths and we do not know what it denotes
+
+**Assumed:** it is the legend's **corian** finish, on the strength of the other
+four `F-FURNITURE HATCH` colours mapping to named finishes and this being the
+only one left unaccounted for.
+
+**Affects:** `tools/cad/texture.py` → `MUTED`, where it is muted to `#A98B3E`.
+
+**Why it is logged now rather than left.** Phase 6 found it and recorded it as
+a curiosity — "nothing here depends on it". Phase 7 changed that: the texture
+now paints every path in the drawing's own colour, so **1,148 paths of it are
+visible on screen** in a colour we chose for something we have not identified.
+A finish we guessed wrong is a wrong colour on the plan, which is cosmetic, but
+it is no longer invisible and so it is no longer nothing.
+
+**What is actually known:** 1,148 paths, on `F-FURNITURE HATCH`, inside the
+building. It is not in the legend extract we hold. That is the whole of it —
+this is a one-line record, not an investigation, and it is deliberately not
+worth more than that until somebody at CBVA has a reason to care.
+
+**Where the answer goes:** one entry in `MUTED`. Nothing else reads it.

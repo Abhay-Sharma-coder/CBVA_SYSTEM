@@ -35,8 +35,30 @@ you earning the right to show them minute seven.
 **Go to Floor Map.**
 
 > "This is Floor 4 as your architect drew it. It is not a redrawing — that is
-> the actual sheet, with 141 desks on top of it. The colours are today's
-> bookings."
+> the actual sheet, in the drawing's own colours, with 141 desks on top of it."
+
+*The plan carries the architect's linework at full fidelity now: every hatch in
+its own colour, the line weights the drawing uses, and the storage credenzas —
+which are embedded photographs in the PDF, not vector geometry, and were
+invisible to us until this phase. If somebody says "that looks like our
+drawing", that is exactly the intent.*
+
+**Start zoomed out and say what you are looking at, because the plan answers a
+different question here.**
+
+> "At this zoom you are not picking a desk, you are reading the floor. Each bay
+> shows how many of its bookable desks are taken — eight of sixteen on the
+> passage run, nine of seventeen down there. That is the whole floor in one
+> glance."
+
+- **Zoom in twice.** The bay counts fade out and the per-desk statuses appear.
+
+> "Now you are choosing a desk, so now it shows you desks."
+
+*Why this matters, if anybody asks: at whole-floor zoom a desk is about eleven
+pixels across. Seven different statuses at eleven pixels is a colour chart
+nobody can read. So past a threshold it stops trying and answers the question
+that zoom actually asks.*
 
 - Point at the **legend**. Note that every status has a **shape or a glyph as
   well as a colour** — these screens get printed in greyscale.
@@ -50,6 +72,9 @@ you earning the right to show them minute seven.
 
 > "Looking straight down, this is the drawing again. That is the point of the
 > 3D view: it is faithful, not decorative."
+
+*The bay counts are there in 3D too, lying flat in the plan, and they hand over
+to per-desk status as you fly in — the same threshold, the same rule.*
 
 - Switch back to **Plan**.
 
@@ -247,6 +272,11 @@ Hand over `docs/OPEN-QUESTIONS.md`.
 
 Short answers. The full versions are in `docs/OPEN-QUESTIONS.md`.
 
+**"Why do zones C and D just say Zone C and Zone D?"**
+> "Because your drawing does not say what the people in those wings do, and we
+> would rather leave it blank than guess on your screen. If they map to teams,
+> tell us and we will label them — it is one line in Admin → Settings."
+
 **"Are those the right desks marked as reserved?"**
 > "Almost certainly not — we invented that allocation. It is a dropdown per desk
 > in Admin → Seats; you can fix all 47 in about five minutes."
@@ -313,3 +343,36 @@ Short answers. The full versions are in `docs/OPEN-QUESTIONS.md`.
 
 Peak 76 against 93 desks; Wednesday busy, Monday dead. That is the whole
 argument.
+
+---
+
+## The fifteen-minute job worth booking before go-live
+
+**Not part of the demo. Offer it at the end, to whoever knows the floor best.**
+
+Eleven of the 141 desks are drawn in a position we *inferred* rather than read
+off the drawing — the drawing genuinely does not say where those chairs are.
+They no longer overlap anything and no occupancy number depends on them; it is
+only where a desk is **drawn**. But somebody from CBVA can close it properly in
+about a quarter of an hour, and it is the last inferred thing on the screen.
+
+**The loop, start to finish:**
+
+1. Open **Admin → Floor plan**. The eleven are listed and badged
+   `11 interpolated` — the corrector starts there and nowhere else.
+2. **Drag each one** to where the desk actually is. Rotate if it faces the wrong
+   way.
+3. Press **Export**. That writes the corrections back into
+   `src/data/floorplan/seats.json`, marked `manual`, and arrives as a reviewable
+   diff rather than a silent database edit.
+4. `npm run seed` carries them into the database.
+
+**A `manual` position now outranks the drawing permanently.** Rebuilding the
+geometry from the PDF (`npm run build:floorplan`) preserves every manual anchor
+verbatim and regenerates only the detected and interpolated ones. Until Phase 7
+it did not — a rebuild silently reverted every correction, which made this loop
+quietly pointless. It is worth knowing that was true, because it is the reason
+the eleven are still inferred.
+
+The eleven: C1-06, C3-08, C3-09, C6-08, C6-09, C7-04, PA-16, D1-08, D1-09,
+D7-04, D8-04.
