@@ -17,6 +17,9 @@ interface Cbva3dStats {
   triangles: number;
   dpr: number;
   frames: number;
+  /** Phase 7: the LOD level and the camera distance that decided it. */
+  lod: "seat" | "bay";
+  distance: number;
 }
 
 /**
@@ -128,6 +131,36 @@ test.describe("the 3D floor plan", () => {
     // something stopped rendering; if it explodes, something stopped instancing.
     expect(s.triangles).toBeGreaterThan(20_000);
     expect(s.triangles).toBeLessThan(120_000);
+  });
+
+  /**
+   * Status LOD in 3D. At whole-floor framing a 0.34 m glyph plate is sub-pixel,
+   * so the plates are dropped and one merged bay-plate mesh answers the density
+   * question instead. This is assertable rather than only visible because
+   * window.__cbva3d carries the level and the camera distance.
+   */
+  test("switches to bay detail at whole-floor distance and back on a zone", async ({
+    page,
+  }) => {
+    await openFloor(page);
+    await enter3d(page);
+
+    const wide = await stats(page);
+    expect(wide.distance).toBeGreaterThan(70);
+    expect(wide.lod).toBe("bay");
+    // The switch REPLACES up to six per-status glyph meshes with one merged
+    // plate mesh, so the budget is spent DOWN by it, never up.
+    expect(wide.calls).toBeLessThan(60);
+
+    await page.getByRole("radio", { name: "Zone C" }).click();
+    await page.waitForTimeout(5000);
+
+    const near = await stats(page);
+    expect(near.distance).toBeLessThan(70);
+    expect(near.lod).toBe("seat");
+    expect(near.calls).toBeLessThan(60);
+    expect(near.triangles).toBeGreaterThan(20_000);
+    expect(near.triangles).toBeLessThan(120_000);
   });
 
   /**

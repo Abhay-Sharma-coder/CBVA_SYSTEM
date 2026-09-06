@@ -19,6 +19,7 @@ import {
   type SeatPalette,
 } from "@/components/floor-plan/three/seat-materials";
 import type { FloorPlanSeat } from "@/components/floor-plan/types";
+import type { LodLevel } from "@/lib/floor-plan-lod";
 import type { SeatVisualStatus } from "@/components/seat/seat-status";
 
 /**
@@ -47,6 +48,14 @@ interface SeatsProps {
   reduceMotion: boolean;
   onFocusSeat: (code: string | null) => void;
   onActivateSeat: (seat: FloorPlanSeat) => void;
+  /**
+   * "bay" means the camera is far enough out that a 0.34 m glyph plate is
+   * sub-pixel. The plates are dropped there and BayPlates answers instead --
+   * the desks themselves stay, in position and pickable, because a desk you
+   * can see and click is still useful at that distance even when its status
+   * is not readable.
+   */
+  lod: LodLevel;
 }
 
 function useGeometries() {
@@ -78,6 +87,7 @@ export function Seats({
   reduceMotion,
   onFocusSeat,
   onActivateSeat,
+  lod,
 }: SeatsProps) {
   const geometries = useGeometries();
 
@@ -176,8 +186,13 @@ export function Seats({
       </Instances>
 
       {/* The non-colour cue. One instanced mesh per status that HAS a glyph, so
-          six draw calls at most, each sampling its own cell of the atlas. */}
-      {GLYPH_ORDER.map((status, index) => {
+          six draw calls at most, each sampling its own cell of the atlas.
+
+          Dropped entirely at bay detail. NOT scaled up to compensate -- that
+          is Phase 4 defect 7, where growing the plate to chase legibility
+          stretched the atlas cell's centred glyph with it and turned all 141
+          desks into smears. A mark that cannot resolve should not be drawn. */}
+      {lod === "seat" && GLYPH_ORDER.map((status, index) => {
         const list = byStatus.get(status);
         if (!list || list.length === 0 || !glyphFor(status)) return null;
         return (

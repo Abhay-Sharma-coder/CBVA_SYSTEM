@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
+import { BayDensity } from "@/components/floor-plan/bay-density";
 import { SeatMarker } from "@/components/floor-plan/seat-marker";
 import { SeatHoverCard } from "@/components/floor-plan/seat-hover-card";
 import { ZoomControls } from "@/components/floor-plan/controls";
@@ -16,6 +17,12 @@ import {
   zoneBounds,
   type ZoneCode,
 } from "@/lib/floorplan";
+import {
+  LOD_2D_ENTER_BAY,
+  LOD_2D_EXIT_BAY,
+  resolveLod,
+  type LodLevel,
+} from "@/lib/floor-plan-lod";
 import { PLAN_LABELS, labelText, nonBookableSummary } from "@/lib/floorplan-labels";
 import { cn } from "@/lib/utils";
 
@@ -175,6 +182,20 @@ export function PlanCanvas({
   const seatSizePx = Math.min(34, Math.max(13, transform.scale * 16));
   const focused = focusedSeatCode ? byCode.get(focusedSeatCode) : undefined;
 
+  /* ---- level of detail (see src/lib/floor-plan-lod.ts) ----
+     Below the threshold the marker is pinned at its 13px floor while the
+     desk pitch keeps shrinking, so the chips collide and the glyphs stop
+     being readable. Rather than render seven statuses nobody can tell apart,
+     the plan answers the question that framing actually asks: how full is
+     each bay. The seat buttons stay in the DOM throughout; only their paint
+     changes. Hysteresis, so a settling spring cannot make it flicker. */
+  const [lod, setLod] = useState<LodLevel>("bay");
+  useEffect(() => {
+    setLod((prev) =>
+      resolveLod(prev, transform.scale, LOD_2D_ENTER_BAY, LOD_2D_EXIT_BAY),
+    );
+  }, [transform.scale]);
+
   return (
     <div
       ref={containerRef}
@@ -185,6 +206,7 @@ export function PlanCanvas({
       onKeyDown={onCanvasKeyDown}
       {...handlers}
       onPointerDown={beginPan}
+      data-lod={lod}
       role="application"
       // Focusable so the plan itself can take the zoom keys. Without it the
       // +/-/0 shortcuts only fired when a seat happened to hold focus.
@@ -277,6 +299,14 @@ export function PlanCanvas({
               </text>
             </g>
           ))}
+
+          <BayDensity
+            seats={seats}
+            activeZone={activeZone}
+            visible={lod === "bay"}
+            reduceMotion={reduceMotion}
+            scale={transform.scale}
+          />
         </svg>
 
         {seats.map((seat) => (
@@ -297,6 +327,7 @@ export function PlanCanvas({
               onKeyDown={onSeatKeyDown}
               onDrag={onDragSeat}
               layerScale={transform.scale}
+              lod={lod}
             />
           </div>
         ))}

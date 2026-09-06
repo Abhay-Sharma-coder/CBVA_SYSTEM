@@ -3,6 +3,13 @@
 import { useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 
+import { Vector3 } from "three";
+
+import type { LodLevel } from "@/lib/floor-plan-lod";
+
+/** Fallback orbit target for the frames before OrbitControls has registered. */
+const ORIGIN = new Vector3(0, 0, 0);
+
 /**
  * The performance budget, measured rather than asserted.
  *
@@ -24,6 +31,18 @@ export interface Cbva3dStats {
   programs: number;
   dpr: number;
   frames: number;
+  /**
+   * Which level of detail the scene is drawing, and how far the camera is
+   * from its orbit target in metres.
+   *
+   * Published for the same reason the draw-call count is: an LOD switch that
+   * is only checked by looking at a screenshot is a feature nobody can prove
+   * still works. e2e/floor-plan-3d.spec.ts already reads this object, so
+   * putting the level here makes the transition assertable with the handle
+   * the suite has rather than a new one.
+   */
+  lod: LodLevel;
+  distance: number;
 }
 
 declare global {
@@ -32,8 +51,10 @@ declare global {
   }
 }
 
-export function PerfProbe() {
+export function PerfProbe({ lod }: { lod: LodLevel }) {
   const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera);
+  const controlsTarget = useThree((s) => s.controls);
   const window_ = typeof window === "undefined" ? null : window;
   const frames = useRef(0);
   const accumulated = useRef(0);
@@ -62,6 +83,14 @@ export function PerfProbe() {
       programs: info.programs?.length ?? 0,
       dpr: gl.getPixelRatio(),
       frames: info.render.frame,
+      lod,
+      distance:
+        Math.round(
+          camera.position.distanceTo(
+            (controlsTarget as { target?: Vector3 } | null)?.target ??
+              ORIGIN,
+          ) * 10,
+        ) / 10,
     };
   });
 

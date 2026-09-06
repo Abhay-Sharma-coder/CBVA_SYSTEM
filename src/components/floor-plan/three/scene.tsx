@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, PerformanceMonitor } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { NoToneMapping } from "three";
 import type { DirectionalLight, Texture } from "three";
 
 import { Floor } from "@/components/floor-plan/three/floor";
+import { BayPlates } from "@/components/floor-plan/three/bay-plates";
 import { PerfProbe } from "@/components/floor-plan/three/perf-probe";
 import { Seats } from "@/components/floor-plan/three/seats";
 import { RoomLabels } from "@/components/floor-plan/three/room-labels";
@@ -27,6 +28,12 @@ import { FLOOR_SIZE } from "@/components/floor-plan/three/coords";
 import { SceneControls } from "@/components/floor-plan/three/scene-controls";
 import type { FloorPlanSeat } from "@/components/floor-plan/types";
 import { FULL_FLOOR_BOUNDS, zoneBounds, type ZoneCode } from "@/lib/floorplan";
+import {
+  LOD_3D_ENTER_BAY,
+  LOD_3D_EXIT_BAY,
+  resolveLod,
+  type LodLevel,
+} from "@/lib/floor-plan-lod";
 
 /** North-west and high, so the wings shade each other rather than the drawing. */
 const SUN: [number, number, number] = [-55, 95, 45];
@@ -82,6 +89,11 @@ export default function Scene3D(props: Scene3DProps) {
   const [refit, setRefit] = useState(0);
   const controls = useRef<OrbitControlsImpl | null>(null);
   const light = useRef<DirectionalLight | null>(null);
+
+  // Level of detail. Starts at "bay" because the scene opens on whole-floor
+  // framing, so the first paint is already the right one rather than a flash
+  // of unreadable glyphs that resolves a frame later.
+  const [lod, setLod] = useState<LodLevel>("bay");
 
   /**
    * The palette is read out of the live cascade rather than hard-coded, so it
@@ -269,6 +281,15 @@ export default function Scene3D(props: Scene3DProps) {
           than as a fault. One merged mesh over one strip atlas: one draw call.
         */}
         <RoomLabels palette={palette} />
+        {/*
+          The far half of the LOD switch. At whole-floor framing a desk is a
+          few pixels across and its status glyph is sub-pixel, so instead of
+          seven statuses nobody can tell apart the plan answers the question
+          that framing actually asks: how full is each bay. One merged mesh
+          over one strip atlas, so this REPLACES up to six glyph meshes with
+          one and the draw-call count goes down, not up.
+        */}
+        {lod === "bay" && <BayPlates seats={seats} palette={palette} />}
         <Seats
           seats={seats}
           palette={palette}
@@ -278,6 +299,7 @@ export default function Scene3D(props: Scene3DProps) {
           reduceMotion={reduceMotion}
           onFocusSeat={onFocusSeat}
           onActivateSeat={onActivateSeat}
+          lod={lod}
         />
 
 
@@ -298,7 +320,8 @@ export default function Scene3D(props: Scene3DProps) {
           autoRotate={false}
         />
 
-        <PerfProbe />
+        <PerfProbe lod={lod} />
+        <LodDirector controls={controls} lod={lod} onChange={setLod} />
         <CameraDirector
           controls={controls}
           reduceMotion={reduceMotion}
@@ -334,6 +357,44 @@ export default function Scene3D(props: Scene3DProps) {
  * effects fighting for the camera on the same frame — which looks exactly like
  * a stutter and is very hard to read as anything else.
  */
+/**
+ * The LOD switch, driven by how far the camera actually is from the floor.
+ *
+ * Distance rather than a zoom number, because in 3D "how far away am I" IS the
+ * distance, and it is the quantity that decides whether a 1.3 m desktop covers
+ * enough pixels for a glyph on it to resolve.
+ *
+ * setState is called ONLY when the level changes, which is a handful of times
+ * in a session -- never per frame. `resolveLod` supplies the hysteresis, so a
+ * damped orbit settling across the boundary cannot make the scene flicker
+ * between two renderings, which is worse than either of them.
+ *
+ * CameraDirector owns camera FLIGHT and this owns what the camera's position
+ * MEANS; they are kept apart so a flight in progress cannot suppress a switch.
+ */
+function LodDirector({
+  controls,
+  lod,
+  onChange,
+}: {
+  controls: React.RefObject<OrbitControlsImpl | null>;
+  lod: LodLevel;
+  onChange: (next: LodLevel) => void;
+}) {
+  useFrame(({ camera }) => {
+    const target = controls.current?.target;
+    if (!target) return;
+    const next = resolveLod(
+      lod,
+      camera.position.distanceTo(target),
+      LOD_3D_ENTER_BAY,
+      LOD_3D_EXIT_BAY,
+    );
+    if (next !== lod) onChange(next);
+  });
+  return null;
+}
+
 function CameraDirector({
   controls,
   reduceMotion,

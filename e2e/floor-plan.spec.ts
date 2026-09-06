@@ -137,6 +137,127 @@ test("fit to floor and keyboard zoom work", async ({ page }) => {
   }
 });
 
+/**
+ * Status LOD. The point of these three is that the LOD is a PAINT change: at
+ * whole-floor zoom the plan answers a density question, and at every zoom the
+ * 141 seat buttons are still there with their names, so nothing a keyboard or
+ * a screen reader can observe moves with the zoom.
+ */
+test("at whole-floor zoom the plan shows bay occupancy, not per-seat status", async ({
+  page,
+}) => {
+  await openFloor(page);
+  const canvas = page.locator("[role='application']");
+  // Fit-to-floor is ~0.61 at this viewport, well below the 0.85 threshold.
+  await expect(canvas).toHaveAttribute("data-lod", "bay");
+
+  // Every seat is STILL a button with its name. This is the assertion that
+  // matters: the accessible path does not degrade with the rendering.
+  await expect(page.locator("[data-seat]")).toHaveCount(141);
+  await expect(page.locator("[data-seat='C3-01']")).toHaveAttribute(
+    "aria-label",
+    /^Seat C3-01, Zone C, bay C3, /,
+  );
+
+  // The bay chips are present, readable, and none covers another. An
+  // overlapping chip is the failure mode this layer has -- bay centroids are
+  // where the desks are, not where there is room to write.
+  const chips = await canvas.evaluate((host) => {
+    const hb = host.getBoundingClientRect();
+    return [...host.querySelectorAll("svg g > g")]
+      .map((g) => {
+        const text = g.querySelector("text");
+        const rect = g.querySelector("rect");
+        if (!text || !rect) return null;
+        const rb = rect.getBoundingClientRect();
+        return {
+          bay: text.textContent ?? "",
+          x: rb.left - hb.left,
+          y: rb.top - hb.top,
+          w: rb.width,
+          h: rb.height,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+  });
+
+  expect(chips.length).toBeGreaterThanOrEqual(10);
+  let overlaps = 0;
+  for (let i = 0; i < chips.length; i++) {
+    for (let k = i + 1; k < chips.length; k++) {
+      const a = chips[i]!;
+      const b = chips[k]!;
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+        overlaps++;
+      }
+    }
+  }
+  expect(overlaps, "bay chips must not cover one another").toBe(0);
+  // And none pushed off the drawing by the separation pass.
+  for (const chip of chips) {
+    expect(chip.y, `chip ${chip.bay} is clipped at the top`).toBeGreaterThanOrEqual(0);
+  }
+
+  // Still a raster, not linework (ADR-019). The chips are rect/text/line.
+  expect(await page.locator(".relative svg path").count()).toBeLessThan(50);
+});
+
+test("zooming in switches to per-seat status, and back out again", async ({ page }) => {
+  await openFloor(page);
+  const canvas = page.locator("[role='application']");
+  await expect(canvas).toHaveAttribute("data-lod", "bay");
+
+  await canvas.focus();
+  // Three presses at 1.3x clears the 1.0 exit threshold from ~0.61.
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("+");
+    await page.waitForTimeout(400);
+  }
+  await expect(canvas).toHaveAttribute("data-lod", "seat");
+  await expect(page.locator("[data-seat]")).toHaveCount(141);
+
+  await page.getByRole("button", { name: "Fit to floor" }).click();
+  await page.waitForTimeout(900);
+  await expect(canvas).toHaveAttribute("data-lod", "bay");
+});
+
+test("the bay chips report bookable occupancy, agreeing with the legend", async ({
+  page,
+}) => {
+  await openFloor(page);
+  const canvas = page.locator("[role='application']");
+  await expect(canvas).toHaveAttribute("data-lod", "bay");
+
+  // Sum the chips and compare with the occupancy readout above the plan. The
+  // failure this catches is the Phase 5 heat-map defect: counting occupied
+  // desks without dividing by each bay's own capacity, which draws a picture
+  // of which bays are biggest rather than which are busy.
+  const totals = await canvas.evaluate((host) => {
+    let occupied = 0;
+    let capacity = 0;
+    for (const g of host.querySelectorAll("svg g > g")) {
+      const texts = g.querySelectorAll("text");
+      const value = texts[1]?.textContent ?? "";
+      const match = /^(\d+)\/(\d+)$/.exec(value.trim());
+      if (match) {
+        occupied += Number(match[1]);
+        capacity += Number(match[2]);
+      }
+    }
+    return { occupied, capacity };
+  });
+
+  const readout = await page.locator("text=/^\d+\/\d+$/").first().textContent();
+  const [, headlineOccupied, headlineCapacity] =
+    /^(\d+)\/(\d+)$/.exec((readout ?? "").trim()) ?? [];
+
+  // Chips cover only bays with bookable supply, so they can total at most the
+  // headline. Anything OVER it means a bay is being double counted.
+  expect(totals.capacity).toBeLessThanOrEqual(Number(headlineCapacity));
+  expect(totals.occupied).toBeLessThanOrEqual(Number(headlineOccupied));
+  expect(totals.capacity).toBeGreaterThan(0);
+});
+
 test("the list view carries the same seats and can be filtered", async ({ page }) => {
   await openFloor(page);
   await page.getByRole("radio", { name: "List" }).click();

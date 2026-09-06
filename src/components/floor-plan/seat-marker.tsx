@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 
 import { SEAT_STATUS_TOKENS } from "@/components/seat/seat-status";
 import type { FloorPlanSeat } from "@/components/floor-plan/types";
+import type { LodLevel } from "@/lib/floor-plan-lod";
 import { PLAN_BOUNDS } from "@/lib/floorplan";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +29,15 @@ interface SeatMarkerProps {
   isFocused: boolean;
   isDimmed: boolean;
   reduceMotion: boolean;
+  /**
+   * "bay" means the plan is framed too wide for per-seat status to be read at
+   * all, so the seat paints as a plain dot and BayDensity answers the question
+   * instead. The BUTTON IS UNCHANGED in every other respect -- same hit box,
+   * same tab order, same accessible name, same status in `data-status`. Only
+   * the paint differs, so nothing a keyboard or a screen reader can observe
+   * moves with the zoom.
+   */
+  lod: LodLevel;
   tabIndex: number;
   onActivate: (seat: FloorPlanSeat) => void;
   onFocus: (seat: FloorPlanSeat) => void;
@@ -42,6 +52,7 @@ function SeatMarkerImpl({
   isFocused,
   isDimmed,
   reduceMotion,
+  lod,
   tabIndex,
   onActivate,
   onFocus,
@@ -52,7 +63,8 @@ function SeatMarkerImpl({
   // Markers hold a constant on-screen size, so a seat stays hittable when the
   // whole cruciform is framed and does not become a billboard when zoomed in.
   const unit = sizePx / scale;
-  const showCode = sizePx >= 26;
+  const aggregate = lod === "bay";
+  const showCode = !aggregate && sizePx >= 26;
 
   const label = [
     `Seat ${seat.seatCode}`,
@@ -88,9 +100,14 @@ function SeatMarkerImpl({
       onPointerLeave={onBlur}
       onKeyDown={(e) => onKeyDown(e, seat)}
       className={cn(
-        "absolute flex items-center justify-center rounded-sm p-0 leading-none",
+        "absolute flex items-center justify-center p-0 leading-none",
         "focus-visible:z-20",
-        token.className,
+        // The hit box is deliberately the SAME SIZE at both levels. Shrinking
+        // the target along with the paint would trade an unreadable chip for
+        // an unclickable one, which is not a better answer.
+        aggregate
+          ? "rounded-full border-0 bg-transparent"
+          : cn("rounded-sm", token.className),
         token.interactive ? "cursor-pointer" : "cursor-default",
         isDimmed && "opacity-25",
       )}
@@ -116,7 +133,18 @@ function SeatMarkerImpl({
           : { type: "spring", stiffness: 520, damping: 26, mass: 0.5 }
       }
     >
-      {showCode ? (
+      {aggregate ? (
+        // A plain dot: enough to show a desk is there, not enough to pretend
+        // its status is legible at this framing.
+        <span
+          aria-hidden="true"
+          className={cn(
+            "rounded-full",
+            isFocused ? "bg-navy" : "bg-ink-subtle",
+          )}
+          style={{ width: unit * 0.34, height: unit * 0.34 }}
+        />
+      ) : showCode ? (
         <span
           className="seat-code font-medium"
           aria-hidden="true"
