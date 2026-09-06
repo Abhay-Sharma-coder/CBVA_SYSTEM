@@ -56,7 +56,13 @@ interface RoomGridPayload {
   viewerId: string;
   viewerIsAdmin: boolean;
   officeHours: { start: string; end: string };
-  rooms: Array<{ id: string; name: string; capacity: number; isBookable: boolean }>;
+  rooms: Array<{
+    id: string;
+    name: string;
+    bayCode: string | null;
+    capacity: number;
+    isBookable: boolean;
+  }>;
   bookings: RoomGridBooking[];
 }
 
@@ -307,6 +313,19 @@ export function RoomsClient() {
                     >
                       {room.name}
                       <span className="ml-2 text-xs text-ink-subtle tabular">{room.capacity}</span>
+                      {/*
+                        The architect's bay tag, in mono because that is what
+                        the type rules reserve it for. It is what lets somebody
+                        looking at "A3 Boardroom · 25 seats" on the floor plan
+                        find the same room here — the name is the field CBVA is
+                        expected to change, so it cannot be the thing that ties
+                        the two screens together.
+                      */}
+                      {room.bayCode ? (
+                        <span className="seat-code ml-2 text-[11px] text-ink-subtle">
+                          {room.bayCode}
+                        </span>
+                      ) : null}
                     </th>
                     {hours.map((hour) => {
                       const booking = isBooked(room.id, hour);

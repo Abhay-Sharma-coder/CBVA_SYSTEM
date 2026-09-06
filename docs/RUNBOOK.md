@@ -1,40 +1,41 @@
 # Runbook — the deployed demo
 
-> ## ⚠ CURRENT STATE — READ FIRST (2026-09-06)
+> ## ✅ RESOLVED (2026-09-06) — production is seeded and Phase 6 is live
 >
-> **`npm run seed` is broken, and production currently has 0 bookings.**
+> Production is healthy: **141 users, 141 seats, 93 bookable, 5,804 bookings,
+> 5 meeting rooms, clock offset 0.** `npm run prod:check` is clean and the live
+> URL serves the Phase 6 build.
 >
-> The seed fails part-way through with:
+> **What actually happened, because the first diagnosis was wrong.** An earlier
+> note here said `bay_code` was "not in `src/lib/db/schema.ts` and not in any
+> migration". It was in both — `schema.ts:274` and `drizzle/0004_room_bay_code.sql`,
+> journalled and committed in `6049e63`. The real fault was narrower and is the
+> whole reason this runbook exists:
 >
-> ```
-> error: column "bay_code" of relation "meeting_rooms" does not exist   (42703)
->   at scripts/seed.ts:502
-> ```
+> **migration 0004 had only ever been applied to the LOCAL database.**
+> `npm run db:migrate` reads `.env.local`. Production never received the column,
+> the deploy promoted code that selects it, and every meeting-room query failed
+> with `42703`. The fix was one command — `npm run prod:migrate` — not a code
+> change.
 >
-> `scripts/seed.ts` inserts a `bay_code` column into `meeting_rooms` that is not
-> in `src/lib/db/schema.ts` and not in any migration. Either the column needs
-> adding in a new `drizzle/0004_*.sql` and to the schema, or the seed should
-> stop writing it — whichever matches the intent behind the change.
+> The seed then deletes `bookings` and `room_bookings` wholesale before
+> regenerating them (ADR-008), so failing between the two emptied both. It also
+> deletes meeting rooms no longer in `MEETING_ROOMS`, so production was left with
+> **one** room, not six. `npm run prod:seed` restored all of it.
 >
-> **Why production is empty rather than merely stale.** The seed deletes
-> `bookings` and `room_bookings` wholesale before regenerating them (ADR-008), so
-> a failure *after* the delete and *before* the insert leaves the table empty.
-> That is what happened. The floor, the people, the releases and the recurring
-> series all survived; only bookings and most room bookings are gone.
+> **The local database was never damaged.** It reports 5 meeting rooms because
+> five is correct after Phase 6, and it has held 5,804 bookings throughout;
+> `npm run seed` completes cleanly and is idempotent across two consecutive runs.
 >
-> The local database is in the same state for the same reason — it reports 5
-> meeting rooms instead of 6 and 291 room bookings instead of 313.
+> **The lesson worth keeping:** a schema change has to reach the production
+> database *before* the code that reads it is promoted. Nothing in this project
+> sequences those, which is why `prod:migrate` exists and why it comes before
+> `deploy` in the release steps below.
 >
-> **To recover once the column is reconciled:**
->
-> ```bash
-> npm run seed                              # fix local first, and confirm it completes
-> npm run prod:seed -- --yes-production
-> npm run prod:check                        # expect ~5,800 bookings
-> ```
->
-> Nothing else in this runbook is affected — the wrapper, the guards and the
-> credentials all work; `prod:check` correctly reports the damage.
+> One gap left open deliberately: `prod:check` warns on seat/user counts, clock
+> offset and queued mail, but **not on a near-empty `bookings` table** — the
+> exact damage that occurred. It reported "looks presentable" against 3 bookings.
+> Worth a threshold.
 
 Operating the live demo: where it is, where its credentials are, how to seed it,
 and what breaks it. **If you are a new session picking this repo up, read this

@@ -59,6 +59,13 @@ export interface RoomGrid {
   rooms: Array<{
     id: string;
     name: string;
+    /**
+     * The architect's bay tag (A3, A9, A8, A7, A6). Carried so this screen and
+     * the floor plan name the same room the same way — the display NAME is the
+     * field CBVA is expected to change, so it cannot be the join key.
+     * Null for a room that is not on the drawing.
+     */
+    bayCode: string | null;
     capacity: number;
     isBookable: boolean;
     amenities: unknown;
@@ -108,6 +115,7 @@ export async function roomDay(db: Db, date: string): Promise<RoomGrid> {
     rooms: rooms.map((r) => ({
       id: r.id,
       name: r.name,
+      bayCode: r.bayCode,
       capacity: r.capacity,
       isBookable: r.isBookable,
       amenities: r.amenities,
