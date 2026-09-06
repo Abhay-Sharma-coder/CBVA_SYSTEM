@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error - .mjs script module, deliberately outside the app's tsconfig
-// paths. prod:check runs under plain node before any build step exists, so its
-// predicate cannot be a TS module without adding tsx to the production path.
+// A .mjs script module on purpose: prod:check runs under plain node, before any
+// build step exists, so its predicate cannot be a TS module without putting tsx
+// on the production path.
 import { MIN_BOOKINGS, evaluateProduction } from "../../scripts/prod-check.mjs";
 
 /**

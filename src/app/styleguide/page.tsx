@@ -386,10 +386,10 @@ export default function StyleguidePage() {
               </thead>
               <tbody>
                 {[
-                  ["C3", "Audit Floor", 9, 8, "89%"],
-                  ["C5", "Audit Floor", 9, 6, "67%"],
-                  ["D4", "Tax & Advisory", 9, 9, "100%"],
-                  ["PA", "Audit Floor", 16, 5, "31%"],
+                  ["C3", "Zone C", 9, 8, "89%"],
+                  ["C5", "Zone C", 9, 6, "67%"],
+                  ["D4", "Zone D", 9, 9, "100%"],
+                  ["PA", "Zone C", 16, 5, "31%"],
                 ].map((row) => (
                   <tr key={row[0] as string}>
                     <Td className="seat-code">{row[0]}</Td>

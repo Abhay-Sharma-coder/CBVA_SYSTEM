@@ -966,6 +966,57 @@ def main():
             "interpolated": len(made), "surplusDropped": surplus,
         })
 
+    # ---- hand corrections outrank the drawing
+    #
+    # ADR-017 makes seats.json the source of truth for seat geometry, and
+    # /admin/floor-plan writes corrections back into it marked `manual`. Until
+    # Phase 7 this step did not exist, so `npm run build:floorplan` regenerated
+    # every anchor from the PDF and silently discarded every one of them.
+    #
+    # That is the Phase 6 trap in its other direction. There, a hand fix run
+    # once outside the pipeline was reverted by the next rebuild and the gate
+    # said nothing because it compared two builds to each other. Here a hand
+    # fix made in the editor -- the ONLY way A24 can actually be closed, because
+    # the drawing genuinely does not say where those eleven chairs are -- would
+    # have been reverted by the next rebuild just as quietly.
+    #
+    # So a `manual` anchor is preserved verbatim: position, rotation and flag.
+    # It is a human who knows the floor overruling an inference, which is the
+    # whole point of the editor existing. `detected` and `interpolated` anchors
+    # are always regenerated, because those ARE the drawing's own answer.
+    manual = {}
+    seats_path = os.path.join(a.out, "seats.json")
+    if os.path.exists(seats_path):
+        try:
+            with open(seats_path, encoding="utf-8") as fh:
+                for row in json.load(fh).get("seats", []):
+                    if row.get("source") == "manual":
+                        manual[row["seatCode"]] = row
+        except (ValueError, KeyError) as exc:
+            raise SystemExit(
+                f"could not read existing {seats_path} to preserve manual "
+                f"anchors: {exc}. Refusing to overwrite it -- a corrupt file "
+                f"here would silently discard hand corrections."
+            )
+    if manual:
+        kept = 0
+        for seat in seats:
+            saved = manual.get(seat["seatCode"])
+            if saved:
+                seat["planX"] = saved["planX"]
+                seat["planY"] = saved["planY"]
+                seat["rotationDeg"] = saved["rotationDeg"]
+                seat["source"] = "manual"
+                kept += 1
+        print(f"  preserved {kept} manual anchor(s) from the committed file",
+              file=sys.stderr)
+        orphans = set(manual) - {s["seatCode"] for s in seats}
+        if orphans:
+            raise SystemExit(
+                f"manual anchors exist for seat codes the schedule no longer "
+                f"has: {sorted(orphans)}. A correction would be lost silently."
+            )
+
     seats_by_zone = collections.defaultdict(int)
     for s in seats:
         seats_by_zone[s["zone"]] += 1

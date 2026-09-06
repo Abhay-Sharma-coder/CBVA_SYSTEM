@@ -51,18 +51,32 @@ export const TOTAL_SEATS = BAYS.reduce((n, b) => n + b.count, 0); // 141
  * labelled "Boardroom" beside a plan label reading "A3 Boardroom · 25 seats"
  * in the OTHER wing is worse than no label at all.
  *
- * C and D are still inventions and are deliberately left alone. The drawing
- * labels the wings A–D and never says what anybody in them does, so "Audit
- * Floor" and "Tax & Advisory Floor" are ours — logged as such in ASSUMPTIONS
- * A11 and in OPEN-QUESTIONS for the client to correct. They are kept because
- * they orient a reader and because replacing them with bare "Zone C" would
- * remove information without removing an unlogged claim.
+ * C AND D NOW CARRY NO CLAIM AT ALL, changed in Phase 7. They had been "Audit
+ * Floor" and "Tax & Advisory Floor" since Phase 1 — both entirely invented. The
+ * drawing labels the wings A–D and never says what anybody in them does.
+ *
+ * They were kept for five phases on the argument that a bare "Zone C" removes
+ * information without removing the claim, and that A11 logs them. But a partner
+ * opening the floor plan does not read ASSUMPTIONS.md. They read "Audit Floor",
+ * and they either believe something untrue about their own office or notice it
+ * is wrong and start doubting the rest of the screen — including the parts that
+ * are right, which is most of it. A label nobody can audit from the screen it
+ * appears on is not orientation, it is an unmarked guess.
+ *
+ * So the question goes back to the only people who can answer it, reworded in
+ * OPEN-QUESTIONS from a disclosure problem into a request: "do wings C and D
+ * correspond to specific teams or functions? If so we will label them." It is a
+ * one-line answer, and it is typed into Admin → Settings rather than deployed.
+ *
+ * A and B keep their names because those ARE drawing-derived: A's boardroom and
+ * four meeting rooms are tagged and PAX-counted on the sheet, and B's zero PAX,
+ * zero workstation hatch and castors note make it the flexible room.
  */
 export const ZONES = [
   { code: "A", displayName: "Zone A — Boardroom & Meeting Rooms", sortOrder: 1 },
   { code: "B", displayName: "Zone B — Flexible Room & Services", sortOrder: 2 },
-  { code: "C", displayName: "Zone C — Audit Floor", sortOrder: 3 },
-  { code: "D", displayName: "Zone D — Tax & Advisory Floor", sortOrder: 4 },
+  { code: "C", displayName: "Zone C", sortOrder: 3 },
+  { code: "D", displayName: "Zone D", sortOrder: 4 },
 ] as const;
 
 /** Codes for one bay, zero-padded: A1-01 … PD-18. */
