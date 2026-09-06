@@ -271,7 +271,56 @@ between A1 and A2 is still ours.
 
 ---
 
-## 9 · Notes for whoever picks this up
+## 9 · ⚠️ DEPLOYMENT IS BLOCKED, and the live site is on the PREVIOUS build
+
+**Status: deployed, broken, rolled back. `https://cbva-workspace.vercel.app` is
+serving the pre-Phase-6 build and is healthy.**
+
+Migration `0004_room_bay_code.sql` adds `meeting_rooms.bay_code`. Drizzle then
+selects that column on every meeting-room query. I applied the migration with
+`npm run db:migrate`, which reads `DATABASE_URL_UNPOOLED` from `.env.local` —
+and **that is not the database Vercel talks to.** The deploy went out, and every
+request touching `meeting_rooms` failed:
+
+```
+error: column "bay_code" does not exist   (42703)
+  select "id", "floor_id", "name", "bay_code", … from "meeting_rooms"
+```
+
+`/rooms` and `/` were broken for about three minutes. Rolled back to
+`cbva-workspace-i7w2rb3k1`, verified healthy, and `/api/rooms` is serving the
+old six rooms again.
+
+**Why I could not simply fix it forward.** The production `DATABASE_URL` and
+`DATABASE_URL_UNPOOLED` are stored on Vercel as **Secret**, and
+`vercel env pull` refuses to emit secret values. I cannot reach that database to
+run the migration.
+
+**What has to happen before this ships, in this order:**
+
+1. Apply `drizzle/0004_room_bay_code.sql` to the **production** database. It is
+   `ALTER TABLE meeting_rooms ADD COLUMN IF NOT EXISTS bay_code text` — additive,
+   nullable, and safe to run on a live table. Either
+   `DATABASE_URL_UNPOOLED=<prod> npm run db:migrate` from a machine that has the
+   secret, or run the SQL in the Neon console.
+2. Re-seed, so the five rooms replace the six. The seed deletes rooms no longer
+   in `MEETING_ROOMS`, and it deletes all `room_bookings` first, so it is safe —
+   but it *is* destructive to demo booking history, which is the point of a
+   re-seed.
+3. `npx vercel --prod --scope <team>`.
+4. Check `GET /api/rooms?date=<a working day>` returns five rooms with bay codes.
+
+**The general lesson, which is bigger than this column.** Nothing in this
+project sequences a migration against a deploy. `vercel.json` has a cron and no
+build command that migrates; `npm run db:migrate` is a thing a human remembers.
+That worked for five phases because no phase before this one added a column.
+The first one that did took the site down. **Any future schema change needs the
+migration applied to the production database BEFORE the code that reads the new
+column is promoted** — or a release step that does it, which is the real fix.
+
+---
+
+## 10 · Notes for whoever picks this up
 
 - **`furniture_type` per anchor is unsolved, and per-bay is the obvious
   retreat.** §4. Do not tune a threshold until 93 appears.
