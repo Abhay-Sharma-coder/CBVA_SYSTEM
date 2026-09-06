@@ -1159,3 +1159,73 @@ because a boardroom table and a visitor's chair are the same CAD layer and the
 drawing does not label them. Nothing anybody sits on is that long. One
 consequence to know: the Zone B credenza run comes out as a 16.7 m `table`,
 which is the right shape and height and the wrong noun.
+
+---
+
+## ADR-045 — Room labels: extracted, joined on the bay code, and drawn as a floor decal
+
+**Decision.** `rooms.json` carries zone A's room schedule — the architect's own
+bay tags and their PAX — read from the same text spans seat detection reads and
+kept strictly apart from it. Display names come from `MEETING_ROOMS`, joined on
+`bayCode`. 2D draws `<text>` in the existing overlay; 3D draws a **floor decal**,
+one merged mesh over one strip atlas.
+
+**Why labels at all.** Zones A and B hold no bookable desks apart from A1 and
+A2. Even with the furniture layer, a wing with no desks reads as a fault unless
+something says what it is. "Boardroom · 25 seats" is a very small amount of
+geometry for a large change in how the plan is read.
+
+**Extracted, not typed.** `bay_anchors` skips every zone-A tag so a meeting
+room's capacity can never be imported as a desk count — A3's 25 becoming 25
+bookable desks is exactly the bug that guard exists to prevent. It is left
+untouched; `room_labels()` reads the same spans separately. Every tag pairs to a
+PAX within 33 plan units: A3→25, A9→10, A8→7, A7→5, A6→5. A4 (storage) and A5
+(lounge) carry none, correctly.
+
+**This independently re-verified the room inventory** seeded one commit earlier
+(ADR — see A3). The five capacities came out of the drawing twice, by two
+different routes, and agreed.
+
+**Joined on the bay code, which is why that column exists.** The only other
+shared key is the display name, and the name is the one field CBVA is expected
+to change. Rename a room on `/rooms` and the plan follows by construction.
+
+**A decal rather than a floating label**, weighed in this order:
+
+1. **The top-down preset is the acceptance test** for the whole 3D view — press
+   it and the model should resolve into the sheet CBVA handed us. A decal lies
+   in the plan and reproduces it. A billboard turns to face the camera and
+   breaks exactly when the view is meant to prove itself.
+2. **Cost.** drei's `<Text>` is per-label SDF geometry and one draw call each.
+   Nine labels is nine; a floor with thirty would spend half a budget of 60 on
+   decoration. Here every label is a quad in world space with its atlas row
+   baked into its UVs, all merged into one `BufferGeometry` — **one draw call
+   and one texture, however many labels there are.** The same merge as the walls
+   (ADR-030) and the same atlas trick as the status glyphs. Per-instance UV
+   offsets would have needed a custom shader; baking them into vertices needs
+   nothing.
+3. **Subordination.** Lying flat keeps them quieter than anything standing up.
+
+**Depth testing is off, and that was found by looking.** The first version lay
+on the floor with depth testing on and was invisible: a 16 m boardroom table is
+0.74 m high and covers its own label completely. A label the furniture hides is
+not a label. They now draw last and are never occluded, still flat in the plan.
+The cost is that at a low orbit a label can show through the wing in front of
+it — which is how map labels behave anyway.
+
+**The honest limit.** A decal is foreshortened at every angle but straight down,
+so in 3D these read at wing framing and shrink to marks at whole-floor framing.
+That is the right way round: at sixty metres up the question is "how full is the
+floor", not "what is that room" — the same LOD argument Phase 4 made about
+per-seat status. The **2D plan carries the same labels as real text and reads
+at fit-to-floor**, and 2D is the default and the accessible view.
+
+**Accessibility.** The 2D labels live in an `aria-hidden` overlay and the 3D
+ones inside a canvas, so on their own they would be visible-only — and what they
+convey is the answer to "why does a third of this floor have no desks on it".
+`nonBookableSummary()` puts the same sentence into both views' accessible
+labels, from the same data, so the two cannot drift.
+
+**Cost.** Nine labels are hard-positioned by the drawing, so a room the drawing
+does not tag gets none. Zone B is labelled from its zone polygon's anchor
+because it carries no tag at all.

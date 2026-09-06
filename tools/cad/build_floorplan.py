@@ -496,6 +496,88 @@ def bay_anchors(spans):
     return tags, expected
 
 
+ROOM_TAG_RE = re.compile(r"^A[3-9]$")
+
+
+def room_labels(spans):
+    """
+    Zone A's room tags and their PAX, which `bay_anchors` deliberately throws
+    away.
+
+    That guard is right: pairing a zone-A PAX to a bay would import a meeting
+    room's capacity as a desk count, and A3's 25 would become 25 bookable
+    desks. But it throws away the drawing's own room schedule with it, and the
+    3D view has no way to say why a whole wing has no desks in it.
+
+    So this reads the same spans and keeps them separately. It NEVER feeds seat
+    detection. Every tag pairs to a PAX annotation within 33 plan units:
+
+        A3 -> 25 (18.6)   A9 -> 10 (32.2)   A8 -> 7 (25.9)
+        A7 ->  5 (25.3)   A6 ->  5 (25.9)
+
+    A4 (storage) and A5 (lounge) carry no PAX, correctly, and come back with
+    pax = None.
+    """
+    spans = [s for s in spans if s.in_plan]
+    tags = {}
+    for s in spans:
+        t = s.text.strip()
+        if ROOM_TAG_RE.match(t) and s.layer == "F-FURNITURE TEXT":
+            tags[t] = (s.x, s.y)
+
+    pax = []
+    for s in spans:
+        m = PAX_RE.match(s.text.strip())
+        if m:
+            pax.append((int(m.group(1)), s.x, s.y))
+
+    out, used = [], set()
+    for tag in sorted(tags):
+        tx, ty = tags[tag]
+        best, bi = None, None
+        for i, (n, px, py) in enumerate(pax):
+            if i in used:
+                continue
+            d = math.hypot(px - tx, py - ty)
+            if d < 35.0 and (best is None or d < best):
+                best, bi = d, i
+        n = None
+        if bi is not None:
+            used.add(bi)
+            n = pax[bi][0]
+        out.append({"bayCode": tag, "pax": n,
+                    "planX": round(tx, 2), "planY": round(ty, 2)})
+    return out
+
+
+def workstation_pax(spans):
+    """
+    The `8 PAX` on the A1/A2 workstation run.
+
+    The build has claimed since Phase 2 that A1 and A2 carry no PAX label and
+    rest on the Phase 1 assumption -- `baysWithoutDrawingPax: ["A1","A2"]`,
+    `seatsConfirmedByDrawingPax: 133`. That is wrong, and it is wrong for the
+    same reason the room schedule was missing: `bay_anchors` skips EVERY tag
+    beginning with A, so it never saw the one zone-A annotation that IS a desk
+    count. It sits 19.1 units from the A2 tag and reads 8, which is exactly
+    A1 + A2 in the bay schedule.
+
+    Reported, not applied. It confirms the pair's total of 8; how those 8 split
+    between A1 and A2 is still ours (ASSUMPTIONS A2/A12), so nothing downstream
+    changes -- only the claim about what the drawing confirms.
+    """
+    spans = [s for s in spans if s.in_plan]
+    a2 = next(((s.x, s.y) for s in spans
+               if s.text.strip() == "A2" and s.layer == "F-FURNITURE TEXT"), None)
+    if a2 is None:
+        return None
+    for s in spans:
+        m = PAX_RE.match(s.text.strip())
+        if m and math.hypot(s.x - a2[0], s.y - a2[1]) < 35.0:
+            return int(m.group(1))
+    return None
+
+
 SHEET_TOTAL_RE = re.compile(r"TOTAL WORKING PEOPLE", re.I)
 PAX_ONLY_RE = re.compile(r"^(\d+)\s*PAX\.?$", re.I)
 
@@ -868,6 +950,14 @@ def main():
             f"the bay schedule sums to {sum(SCHEDULE.values())}"
         )
 
+    # ---- zone A's room schedule, kept apart from seat detection
+    rooms = room_labels(spans)
+    ws_pax = workstation_pax(spans)
+    print("  zone A rooms: " + ", ".join(
+        f"{r['bayCode']}={r['pax'] if r['pax'] is not None else '-'}" for r in rooms),
+        file=sys.stderr)
+    print(f"  A1+A2 workstation run PAX annotation: {ws_pax}", file=sys.stderr)
+
     # ---- chairs
     chairs = find_chairs(paths, mask)
     print(f"  chair blocks: {len(chairs)}", file=sys.stderr)
@@ -958,6 +1048,7 @@ def main():
     })
     dump("zones.json", {"viewBox": meta["viewBox"], "zones": zones})
     dump("furniture.json", {"viewBox": meta["viewBox"], "items": furniture})
+    dump("rooms.json", {"viewBox": meta["viewBox"], "rooms": rooms})
     dump("seats.json", {"viewBox": meta["viewBox"], "seats": seats})
     dump("detected-modules.json", {
         "viewBox": meta["viewBox"],
@@ -972,6 +1063,7 @@ def main():
         "sheetExclusionNote": sheet_note,
         "scheduleDrift": drift,
         "baysWithoutDrawingPax": unconfirmed,
+        "workstationRunPax": ws_pax,
         "seatsConfirmedByDrawingPax": sum(v for k, v in SCHEDULE.items()
                                           if k in expected),
         "zoneBChairsDetected": zone_b_chairs,

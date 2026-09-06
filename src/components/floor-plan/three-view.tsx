@@ -11,6 +11,7 @@ import {
   type FallbackReason,
 } from "@/components/floor-plan/three/webgl";
 import type { ZoneCode } from "@/lib/floorplan";
+import { nonBookableSummary } from "@/lib/floorplan-labels";
 
 /**
  * THE 3D VIEW'S FRONT DOOR — and the only place `three` is reachable from.
@@ -116,7 +117,7 @@ export function ThreeView(props: ThreeViewProps) {
           role="img"
           data-focused-seat={focusedSeatCode ?? ""}
           data-selected-seat={selectedSeatCode ?? ""}
-          aria-label={`Three-dimensional view of Floor 4, showing ${seats.length} desks. For keyboard access use the plan or list view.`}
+          aria-label={`Three-dimensional view of Floor 4, showing ${seats.length} desks. ${nonBookableSummary()} For keyboard access use the plan or list view.`}
         >
           <Scene3D
             seats={seats}

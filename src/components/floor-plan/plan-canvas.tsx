@@ -16,6 +16,7 @@ import {
   zoneBounds,
   type ZoneCode,
 } from "@/lib/floorplan";
+import { PLAN_LABELS, labelText, nonBookableSummary } from "@/lib/floorplan-labels";
 import { cn } from "@/lib/utils";
 
 interface PlanCanvasProps {
@@ -188,7 +189,7 @@ export function PlanCanvas({
       // Focusable so the plan itself can take the zoom keys. Without it the
       // +/-/0 shortcuts only fired when a seat happened to hold focus.
       tabIndex={0}
-      aria-label="Floor 4 plan. Use the arrow keys to move between seats, plus and minus to zoom, and 0 to fit the floor."
+      aria-label={`Floor 4 plan. Use the arrow keys to move between seats, plus and minus to zoom, and 0 to fit the floor. ${nonBookableSummary()}`}
     >
       <motion.div
         className="absolute top-0 left-0 origin-top-left will-change-transform"
@@ -241,6 +242,40 @@ export function PlanCanvas({
               }}
               transition={reduceMotion ? { duration: 0 } : { duration: 0.18 }}
             />
+          ))}
+
+          {/*
+            Room labels. Zones A and B have no bookable desks at all — a
+            boardroom, four meeting rooms, two lounges and a flexible room —
+            so without these the wings read as a fault rather than as rooms.
+
+            <text>, not <path>: e2e/floor-plan.spec.ts counts paths inside this
+            container to hold ADR-019's promise that the CAD linework is a
+            raster and never thousands of nodes. Text costs nothing against it.
+
+            The bay code is JetBrains Mono because that is what the type rules
+            reserve it for — seat codes, bay labels, plan annotations.
+          */}
+          {PLAN_LABELS.map((label) => (
+            <g key={label.code} className="fill-ink-subtle">
+              <text
+                x={label.planX}
+                y={label.planY - 5}
+                textAnchor="middle"
+                className="font-mono"
+                style={{ fontSize: 11, letterSpacing: "0.04em" }}
+              >
+                {label.code}
+              </text>
+              <text
+                x={label.planX}
+                y={label.planY + 9}
+                textAnchor="middle"
+                style={{ fontSize: 12 }}
+              >
+                {labelText(label)}
+              </text>
+            </g>
           ))}
         </svg>
 

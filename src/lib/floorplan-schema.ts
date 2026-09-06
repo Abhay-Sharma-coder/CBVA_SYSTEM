@@ -92,6 +92,28 @@ export const furnitureSchema = z.object({
   ),
 });
 
+/**
+ * Zone A's room schedule, read off the drawing's own bay tags and PAX
+ * annotations. `pax` is null for the bays that carry no count — A4 (storage)
+ * and A5 (the lounge).
+ *
+ * Kept apart from seat detection on purpose: `bay_anchors` in the extractor
+ * skips every zone-A tag so that a meeting room's capacity can never be
+ * imported as a desk count. This is the same text, read separately, for
+ * labelling only.
+ */
+export const roomsSchema = z.object({
+  viewBox: z.string(),
+  rooms: z.array(
+    z.object({
+      bayCode: z.string(),
+      pax: z.number().int().nullable(),
+      planX: z.number(),
+      planY: z.number(),
+    }),
+  ),
+});
+
 export const zonesSchema = z.object({
   viewBox: z.string(),
   zones: z

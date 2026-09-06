@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BAYS, TOTAL_SEATS, seatCodes } from "@/lib/seed-data/inventory";
+import { BAYS, MEETING_ROOMS, TOTAL_SEATS, seatCodes } from "@/lib/seed-data/inventory";
 import {
   FULL_FLOOR_BOUNDS,
   PLAN_BOUNDS,
@@ -8,12 +8,14 @@ import {
   floorplanDetectionReport,
   floorplanFurniture,
   floorplanMeta,
+  floorplanRooms,
   floorplanSeatAnchors,
   floorplanWalls,
   floorplanZones,
   nearestDetectedModule,
   seatAnchor,
 } from "@/lib/floorplan";
+import { PLAN_LABELS, nonBookableSummary } from "@/lib/floorplan-labels";
 
 /**
  * Guards on the generated CAD geometry.
@@ -368,5 +370,62 @@ describe("static furniture massing", () => {
       expect(f.rotationDeg).toBeGreaterThanOrEqual(0);
       expect(f.rotationDeg).toBeLessThanOrEqual(180);
     }
+  });
+});
+
+/**
+ * Room labels (ADR-045).
+ *
+ * The capacities here came off the drawing by a different route from the ones
+ * seeded into MEETING_ROOMS — the extractor reads zone A's bay tags and PAX
+ * annotations, which seat detection deliberately throws away. Asserting the
+ * two agree is a real cross-check, not a tautology: if a future revision moves
+ * a PAX annotation, this fails rather than the plan and the rooms screen
+ * quietly disagreeing.
+ */
+describe("room labels", () => {
+  it("reads zone A's room schedule off the drawing", () => {
+    const byBay = new Map(floorplanRooms.rooms.map((r) => [r.bayCode, r.pax]));
+    expect(byBay.get("A3")).toBe(25);
+    expect(byBay.get("A9")).toBe(10);
+    expect(byBay.get("A8")).toBe(7);
+    expect(byBay.get("A7")).toBe(5);
+    expect(byBay.get("A6")).toBe(5);
+    // Storage and the lounge are not rooms with a capacity, and the drawing
+    // gives them no PAX. A null here is the drawing being read correctly.
+    expect(byBay.get("A4")).toBeNull();
+    expect(byBay.get("A5")).toBeNull();
+  });
+
+  it("agrees with the seeded meeting room inventory, bay for bay", () => {
+    const drawing = new Map(floorplanRooms.rooms.map((r) => [r.bayCode, r.pax]));
+    for (const room of MEETING_ROOMS) {
+      expect(drawing.get(room.bayCode)).toBe(room.capacity);
+    }
+    // And the drawing has no room the inventory is missing.
+    const seeded = new Set<string>(MEETING_ROOMS.map((r) => r.bayCode));
+    const withPax = floorplanRooms.rooms.filter((r) => r.pax !== null).map((r) => r.bayCode);
+    expect(withPax.sort()).toEqual([...seeded].sort());
+  });
+
+  it("labels every room, and puts them inside the plan", () => {
+    expect(PLAN_LABELS.length).toBeGreaterThanOrEqual(8);
+    for (const label of PLAN_LABELS) {
+      expect(label.name.length).toBeGreaterThan(0);
+      expect(label.planX).toBeGreaterThanOrEqual(PLAN_BOUNDS.x);
+      expect(label.planX).toBeLessThanOrEqual(PLAN_BOUNDS.x + PLAN_BOUNDS.width);
+      expect(label.planY).toBeGreaterThanOrEqual(PLAN_BOUNDS.y);
+      expect(label.planY).toBeLessThanOrEqual(PLAN_BOUNDS.y + PLAN_BOUNDS.height);
+    }
+    // Zone B has no bay tag of its own and must still be named — it is the
+    // wing whose emptiness the labels exist to explain.
+    expect(PLAN_LABELS.some((l) => l.code === "B")).toBe(true);
+  });
+
+  it("says why the wings are empty, in a sentence a screen reader can read", () => {
+    const summary = nonBookableSummary();
+    expect(summary).toContain("Boardroom (25 seats)");
+    expect(summary).toContain("A1 and A2");
+    expect(summary.length).toBeGreaterThan(80);
   });
 });

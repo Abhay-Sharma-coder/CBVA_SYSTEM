@@ -10,6 +10,7 @@ import type { DirectionalLight, Texture } from "three";
 import { Floor } from "@/components/floor-plan/three/floor";
 import { PerfProbe } from "@/components/floor-plan/three/perf-probe";
 import { Seats } from "@/components/floor-plan/three/seats";
+import { RoomLabels } from "@/components/floor-plan/three/room-labels";
 import { StaticFurniture } from "@/components/floor-plan/three/static-furniture";
 import { Walls } from "@/components/floor-plan/three/walls";
 import { buildGlyphAtlas } from "@/components/floor-plan/three/glyph-atlas";
@@ -263,6 +264,11 @@ export default function Scene3D(props: Scene3DProps) {
           nothing here is pickable — see the raycast note in static-furniture.
         */}
         <StaticFurniture palette={palette} />
+        {/*
+          Room labels, so a wing with no desks reads as "meeting rooms" rather
+          than as a fault. One merged mesh over one strip atlas: one draw call.
+        */}
+        <RoomLabels palette={palette} />
         <Seats
           seats={seats}
           palette={palette}
