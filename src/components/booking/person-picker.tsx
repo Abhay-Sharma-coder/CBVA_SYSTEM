@@ -212,7 +212,19 @@ export function PersonPicker({
               >
                 <span>
                   {person.displayName}
-                  <span className="ml-2 text-xs text-ink-subtle">
+                  {/*
+                    ink-subtle measures 4.21:1 on navy-tint — under AA — which
+                    is the same defect Phase 2 found on the selected date chip
+                    and fixed the same way. The grade and team are secondary
+                    text, so they go one step darker only on the highlighted
+                    row rather than everywhere.
+                  */}
+                  <span
+                    className={cn(
+                      "ml-2 text-xs",
+                      index === activeIndex ? "text-ink-muted" : "text-ink-subtle",
+                    )}
+                  >
                     {GRADE_LABELS[person.grade] ?? person.grade}
                     {person.team ? ` · ${person.team}` : ""}
                   </span>
