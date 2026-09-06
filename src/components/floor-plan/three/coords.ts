@@ -99,6 +99,16 @@ export const DIMENSIONS = {
   deskDepth: 0.75,
   deskHeight: 0.74,
   deskTopThickness: 0.04,
+  /**
+   * Static furniture (ADR-044). Every one of these is invented, like every
+   * other vertical dimension in this view — the drawing is a plan and carries
+   * no section. See ASSUMPTIONS A23. They only have to be plausible and
+   * DIFFERENT enough that a table does not read as a planter.
+   */
+  tableHeight: 0.74,
+  seatingHeight: 0.42,
+  planterHeight: 0.5,
+  modularHeight: 0.9,
   chairSeatHeight: 0.45,
   chairWidth: 0.5,
 } as const;

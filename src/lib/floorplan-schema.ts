@@ -32,6 +32,7 @@ export const floorplanMetaSchema = z.object({
     wallPolygons: z.number().int(),
     chairBlocksDetected: z.number().int(),
     chairBlocksUnassigned: z.number().int(),
+    furnitureBoxes: z.number().int().optional(),
     interiorCoverage: z.number(),
   }),
 });
@@ -52,6 +53,41 @@ export const wallsSchema = z.object({
       layer: wallLayerSchema,
       closed: z.boolean(),
       points: z.array(point).min(2),
+    }),
+  ),
+});
+
+/**
+ * Static furniture massing — everything on the floor that is NOT a bookable
+ * desk: the boardroom and meeting room tables, both lounges, the foldable
+ * tables, the storage credenzas, the planters.
+ *
+ * One minimum-area ORIENTED box per chained CAD outline, because the two side
+ * wings are drawn at 45 degrees and an axis-aligned box round a sofa in zone B
+ * is half again too big and points the wrong way.
+ *
+ * This is context, never content. Nothing here is interactive, nothing here
+ * carries a booking status, and nothing here is a seat.
+ */
+export const furnitureKindSchema = z.enum([
+  "table",
+  "seating",
+  "planter",
+  "modular",
+]);
+export type FurnitureKind = z.infer<typeof furnitureKindSchema>;
+
+export const furnitureSchema = z.object({
+  viewBox: z.string(),
+  items: z.array(
+    z.object({
+      kind: furnitureKindSchema,
+      x: z.number(),
+      y: z.number(),
+      w: z.number().positive(),
+      h: z.number().positive(),
+      /** Plan-space rotation of the box's long axis, 0..180. */
+      rotationDeg: z.number().min(0).max(180),
     }),
   ),
 });

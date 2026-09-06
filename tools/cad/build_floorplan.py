@@ -106,6 +106,41 @@ WALL_CLASSES = (
     ("glazing", GLAZING_LAYERS, 300, None),
 )
 
+# ---------------------------------------------------------------------------
+# STATIC FURNITURE (ADR-044)
+#
+# The renderer draws a mesh only where a BOOKABLE SEAT exists, so zones A and B
+# -- a 25-person boardroom, four meeting rooms, two lounges, eight foldable
+# tables on castors and a run of storage credenzas -- come out as bare floor.
+# That is a rendering gap, not a data gap: there are no seats to add.
+#
+# So: massing for the furniture that is not a desk, from the drawing's own
+# layers rather than modelled by hand.
+#
+#   F-LOOSE FURNITURE   A 1035  B 427   the soft furniture, and the tables
+#   LANDSCAPE           A 3341  D 916   planters
+#   I-FURN-MODU         B   67           zone B's modular furniture
+#
+# Each chain is reduced to its minimum-area ORIENTED bounding box. Massing, not
+# outline extrusion: ExtrudeGeometry needs a simple closed shape and most of
+# these chains are open polylines, which is the same reason ADR-030 gives for
+# the walls. A slab is enough -- the baked drawing underneath already carries
+# the real linework at full fidelity, so each box sits on its own drawn
+# footprint and reads as the thing it covers.
+#
+# The one non-obvious rule is the size split inside F-LOOSE FURNITURE. A
+# boardroom table and a visitor's chair are the same layer and want different
+# heights, and the drawing does not label them. 40 plan units (2.82 m) is the
+# threshold: nothing anybody sits ON is that long, and every table in zones A
+# and B is longer. It is a guess about height only -- see ASSUMPTIONS A23.
+FURNITURE_TABLE_UNITS = 40.0
+
+FURNITURE_CLASSES = (
+    ("loose", {"F-LOOSE FURNITURE"}, 600),
+    ("planter", {"LANDSCAPE"}, 300),
+    ("modular", {"I-FURN-MODU"}, 100),
+)
+
 BAY_RE = re.compile(r"^(A[12]|C[1-7]|D[1-8])$")
 PAX_RE = re.compile(r"^(\d+)\s*PAX\.?$", re.I)
 
@@ -164,6 +199,79 @@ def drop_collinear(points, tol_deg=0.5):
         if abs(math.degrees(a2 - a1)) % 180.0 > tol_deg:
             out.append(points[i])
     out.append(points[-1])
+    return out
+
+
+def oriented_box(points):
+    """
+    Minimum-area oriented bounding box, by rotating calipers over the polygon's
+    own edge directions. Returns (cx, cy, w, h, deg) or None.
+
+    Axis-aligned boxes are wrong here: this building is a cruciform and its two
+    side wings are drawn at 45 degrees, so an axis-aligned box round a sofa in
+    zone B is half again too big and points the wrong way.
+    """
+    if len(points) < 2:
+        return None
+    best = None
+    seen = set()
+    for i in range(len(points)):
+        ax, ay = points[i]
+        bx, by = points[(i + 1) % len(points)]
+        dx, dy = bx - ax, by - ay
+        if math.hypot(dx, dy) < 1e-6:
+            continue
+        a = round(math.atan2(dy, dx) % math.pi, 4)
+        if a in seen:
+            continue
+        seen.add(a)
+        c, sn = math.cos(-a), math.sin(-a)
+        us = [(x * c - y * sn, x * sn + y * c) for x, y in points]
+        x0 = min(u[0] for u in us); x1 = max(u[0] for u in us)
+        y0 = min(u[1] for u in us); y1 = max(u[1] for u in us)
+        area = (x1 - x0) * (y1 - y0)
+        if best is None or area < best[0]:
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            c2, s2 = math.cos(a), math.sin(a)
+            best = (area, cx * c2 - cy * s2, cx * s2 + cy * c2,
+                    x1 - x0, y1 - y0, math.degrees(a))
+    return best[1:] if best else None
+
+
+def build_furniture(paths, mask):
+    """Static furniture massing: one oriented box per chained outline."""
+    out = []
+    for name, layers, budget in FURNITURE_CLASSES:
+        chains = build_walls(paths, layers=layers, snap=1.0, simplify=1.0,
+                             min_length=6.0, max_polys=100000)
+        boxes = []
+        for ch in chains:
+            box = oriented_box(ch["points"])
+            if box is None:
+                continue
+            cx, cy, w, h, deg = box
+            # Outside the shell is the sheet's legend and title block.
+            if not mask.contains(cx, cy):
+                continue
+            # Sub-100 mm slivers are linework, not furniture.
+            if w < 2.0 or h < 2.0:
+                continue
+            kind = name
+            if name == "loose":
+                kind = "table" if max(w, h) >= FURNITURE_TABLE_UNITS else "seating"
+            boxes.append({
+                "kind": kind,
+                "x": round(cx, 2), "y": round(cy, 2),
+                "w": round(w, 2), "h": round(h, 2),
+                "rotationDeg": round(deg % 180.0, 1),
+            })
+        if len(boxes) > budget:
+            raise SystemExit(
+                f"furniture class {name} produced {len(boxes)} boxes (budget {budget})")
+        out.extend(boxes)
+        print(f"  furniture {name}: {len(boxes)} boxes (budget {budget})",
+              file=sys.stderr)
+    out.sort(key=lambda b: (b["kind"], b["x"], b["y"]))
     return out
 
 
@@ -738,6 +846,10 @@ def main():
         raise SystemExit(f"wall simplification produced {len(walls)} polygons")
     print(f"  walls: {len(walls)} polygons", file=sys.stderr)
 
+    # ---- static furniture, one oriented box per chained outline
+    furniture = build_furniture(paths, mask)
+    print(f"  furniture: {len(furniture)} boxes", file=sys.stderr)
+
     # ---- anchors and the schedule cross-check
     anchors, expected = bay_anchors(spans)
     missing = [b for b in SCHEDULE if b not in anchors]
@@ -827,6 +939,7 @@ def main():
             "wallPolygons": len(walls),
             "chairBlocksDetected": len(chairs),
             "chairBlocksUnassigned": len(unassigned),
+            "furnitureBoxes": len(furniture),
             "interiorCoverage": round(mask.coverage, 4),
         },
     }
@@ -844,6 +957,7 @@ def main():
                      for w in walls],
     })
     dump("zones.json", {"viewBox": meta["viewBox"], "zones": zones})
+    dump("furniture.json", {"viewBox": meta["viewBox"], "items": furniture})
     dump("seats.json", {"viewBox": meta["viewBox"], "seats": seats})
     dump("detected-modules.json", {
         "viewBox": meta["viewBox"],

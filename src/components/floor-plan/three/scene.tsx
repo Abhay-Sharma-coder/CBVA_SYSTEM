@@ -10,6 +10,7 @@ import type { DirectionalLight, Texture } from "three";
 import { Floor } from "@/components/floor-plan/three/floor";
 import { PerfProbe } from "@/components/floor-plan/three/perf-probe";
 import { Seats } from "@/components/floor-plan/three/seats";
+import { StaticFurniture } from "@/components/floor-plan/three/static-furniture";
 import { Walls } from "@/components/floor-plan/three/walls";
 import { buildGlyphAtlas } from "@/components/floor-plan/three/glyph-atlas";
 import { readSeatPalette, type SeatPalette } from "@/components/floor-plan/three/seat-materials";
@@ -256,6 +257,12 @@ export default function Scene3D(props: Scene3DProps) {
             glazing: palette.chrome.navy,
           }}
         />
+        {/*
+          Static furniture, between the shell and the desks. Drawn BEFORE the
+          seats deliberately: this is context, the desks are content, and
+          nothing here is pickable — see the raycast note in static-furniture.
+        */}
+        <StaticFurniture palette={palette} />
         <Seats
           seats={seats}
           palette={palette}

@@ -6,6 +6,7 @@ import {
   PLAN_BOUNDS,
   floorplanDetectedModules,
   floorplanDetectionReport,
+  floorplanFurniture,
   floorplanMeta,
   floorplanSeatAnchors,
   floorplanWalls,
@@ -306,5 +307,66 @@ describe("no two desks occupy the same space (ASSUMPTIONS A24)", () => {
         "D1-08", "D1-09", "D7-04", "D8-04", "PA-16",
       ].sort(),
     );
+  });
+});
+
+/**
+ * Static furniture (ADR-044).
+ *
+ * The layer exists for one reason: zones A and B contain a 25-person
+ * boardroom, four meeting rooms, two lounges, eight foldable tables and a run
+ * of storage credenzas, and not one bookable desk — so before this they
+ * rendered as bare plate. These guard the property that makes it worth having
+ * rather than the exact box count, which will move if the drawing is revised.
+ */
+describe("static furniture massing", () => {
+  const items = floorplanFurniture.items;
+
+  it("produces every kind, so no class can silently vanish", () => {
+    for (const kind of ["table", "seating", "planter", "modular"] as const) {
+      expect(items.filter((f) => f.kind === kind).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("puts furniture in zones A and B, which is the whole point", () => {
+    // The two west wings, in plan coordinates. Zone A is the boardroom and the
+    // meeting rooms; zone B is the flexible room. Both are seatless.
+    const west = items.filter((f) => f.x < 620);
+    expect(west.length).toBeGreaterThan(100);
+  });
+
+  it("keeps every box inside the plan bounds", () => {
+    const b = PLAN_BOUNDS;
+    for (const f of items) {
+      expect(f.x).toBeGreaterThanOrEqual(b.x);
+      expect(f.x).toBeLessThanOrEqual(b.x + b.width);
+      expect(f.y).toBeGreaterThanOrEqual(b.y);
+      expect(f.y).toBeLessThanOrEqual(b.y + b.height);
+    }
+  });
+
+  it("has plausible real-world dimensions", () => {
+    const mm = floorplanMeta.mmPerUnit ?? 70.5556;
+    for (const f of items) {
+      const longest = (Math.max(f.w, f.h) * mm) / 1000;
+      // 100 mm is the sliver filter; 20 m is longer than any wing is wide.
+      expect(longest).toBeGreaterThan(0.1);
+      expect(longest).toBeLessThan(20);
+    }
+    const seating = items
+      .filter((f) => f.kind === "seating")
+      .map((f) => (Math.max(f.w, f.h) * mm) / 1000)
+      .sort((a, b) => a - b);
+    // A thing somebody sits on is not three metres long. This is the threshold
+    // that separates seating from tables inside F-LOOSE FURNITURE.
+    expect(seating[Math.floor(seating.length / 2)]).toBeLessThan(1.6);
+  });
+
+  it("stays within a budget the 3D view can draw in one call per kind", () => {
+    expect(items.length).toBeLessThan(800);
+    for (const f of items) {
+      expect(f.rotationDeg).toBeGreaterThanOrEqual(0);
+      expect(f.rotationDeg).toBeLessThanOrEqual(180);
+    }
   });
 });

@@ -130,6 +130,34 @@ test.describe("the 3D floor plan", () => {
     expect(s.triangles).toBeLessThan(120_000);
   });
 
+  /**
+   * ADR-044. The static furniture layer must be DRAWN and must be INERT.
+   *
+   * Drawn: four more instanced meshes, one per kind, and the triangles to go
+   * with 318 boxes. If a class stops rendering, zones A and B go back to being
+   * bare plate, which is the only thing this layer was built for.
+   *
+   * Inert: it adds nothing to the DOM. It also cannot steal a pick — none of
+   * it has a pointer handler, so it has no seat code to report. The failure it
+   * COULD cause is blocking one, by standing in front of a desk without
+   * `raycast={() => null}`; that is guarded by the pick test below, which
+   * filters to Zone D — a wing that now carries 81 furniture boxes of its own.
+   */
+  test("the static furniture is drawn, and adds nothing to the DOM", async ({ page }) => {
+    await openFloor(page);
+    await enter3d(page);
+
+    const s = await stats(page);
+    // Phase 4 measured 11 calls and ~40k triangles with no furniture layer.
+    // Four instanced kinds put it at 15, a long way inside the budget of 60.
+    expect(s.calls).toBeGreaterThanOrEqual(13);
+    expect(s.calls).toBeLessThan(60);
+    expect(s.triangles).toBeGreaterThan(40_000);
+    expect(s.triangles).toBeLessThan(120_000);
+    // 318 boxes, and not one of them is an element.
+    await expect(page.locator("[data-seat]")).toHaveCount(0);
+  });
+
   test("the DOM stays out of it — no per-seat nodes, no CAD linework", async ({ page }) => {
     await openFloor(page);
     await enter3d(page);

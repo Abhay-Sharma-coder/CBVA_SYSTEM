@@ -19,6 +19,7 @@ import sharp from "sharp";
 import {
   detectionReportSchema,
   floorplanMetaSchema,
+  furnitureSchema,
   seatAnchorsSchema,
   wallsSchema,
   zonesSchema,
@@ -118,6 +119,7 @@ function validate() {
   const meta = floorplanMetaSchema.parse(read("meta.json"));
   const walls = wallsSchema.parse(read("walls.json"));
   const zones = zonesSchema.parse(read("zones.json"));
+  const furniture = furnitureSchema.parse(read("furniture.json"));
   const seats = seatAnchorsSchema.parse(read("seats.json"));
   const report = detectionReportSchema.parse(read("detection-report.json"));
 
@@ -139,6 +141,16 @@ function validate() {
   if (zones.zones.length !== 4) {
     problems.push(`expected 4 zones, got ${zones.zones.length}`);
   }
+  // Static furniture (ADR-044). The point of the layer is that zones A and B
+  // stop rendering as bare plate, so an empty class there is a silent
+  // regression of the only thing it was built for.
+  const FURNITURE_BUDGETS = { table: 60, seating: 400, planter: 300, modular: 100 } as const;
+  for (const [kind, budget] of Object.entries(FURNITURE_BUDGETS)) {
+    const n = furniture.items.filter((f) => f.kind === kind).length;
+    if (n > budget) problems.push(`expected under ${budget} ${kind} boxes, got ${n}`);
+    if (n === 0) problems.push(`no ${kind} furniture was produced`);
+  }
+  if (furniture.items.length === 0) problems.push("no static furniture was produced");
   const codes = new Set(seats.seats.map((s) => s.seatCode));
   if (codes.size !== seats.seats.length) problems.push("duplicate seat codes");
 
@@ -209,6 +221,7 @@ function validate() {
 
   console.log(
     `\nvalidated: ${seats.seats.length} seats, ${walls.polygons.length} wall polygons, ` +
+      `${furniture.items.length} furniture boxes, ` +
       `${zones.zones.length} zones, scale ${meta.mmPerUnit ?? "unresolved"} mm/unit`,
   );
 }

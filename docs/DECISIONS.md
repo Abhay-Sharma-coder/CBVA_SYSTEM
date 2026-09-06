@@ -1099,3 +1099,63 @@ checked out with `core.autocrlf=true`, so git rewrites LF to CRLF in the working
 tree and a raw `sha256sum` of a checked-out file does not match its blob.
 `git diff --exit-code` is the gate; a hash comparison is only valid between two
 files the build itself wrote.
+
+---
+
+## ADR-044 — Static furniture is massing from the CAD, and it is inert
+
+**Decision.** `furniture.json` carries one minimum-area **oriented** box per
+chained outline on `F-LOOSE FURNITURE`, `LANDSCAPE` and `I-FURN-MODU`, tagged
+`table` / `seating` / `planter` / `modular`. `three/static-furniture.tsx` draws
+them as one `<Instances>` per kind. Nothing in it is interactive.
+
+**Why it exists.** The renderer draws a mesh only where a **bookable seat**
+exists. Zone A is a 25-person boardroom, four meeting rooms, a lounge and
+storage; Zone B is a flexible room with eight foldable tables on castors, a sofa
+lounge and a run of storage credenzas. Neither has a single bookable desk, so
+both wings rendered as bare plate — which reads as *broken* rather than as "that
+wing is meeting rooms". **No seat was added to fix that.** There are no seats
+there; seats.json is right, and the gap was in the rendering.
+
+**Massing, not outline extrusion.** `ExtrudeGeometry` needs a simple closed
+shape and most of these chains are open polylines — the same reason ADR-030
+gives for the walls, one layer further out. A slab is enough: the baked drawing
+underneath already carries the real linework at full fidelity, so every box sits
+on its own drawn footprint and reads as the thing it covers.
+
+**Oriented, not axis-aligned.** The building is a cruciform and its two side
+wings are drawn at 45°. An axis-aligned box round a sofa in Zone B is half again
+too big and points the wrong way.
+
+**The constraint that matters most: zero interactivity.** Every mesh sets
+`raycast={() => null}` and nothing enters the DOM. The moment non-bookable
+furniture becomes clickable, somebody tries to book the boardroom from the floor
+plan and desk booking and room booking — two deliberately separate flows — merge
+into one.
+
+Note *which* failure is possible, because the first test written for this tested
+the wrong one. Furniture has no pointer handler, so it can never **steal** a
+pick: it has no seat code to report. What it can do is **block** one, by
+standing in front of a desk without the raycast opt-out. The guard is therefore
+the existing pick test, which filters to Zone D — a wing that now carries 81
+furniture boxes of its own — and still resolves a desk. A sweeping "is anything
+else pickable" test was written, measured at ~2.7 s per pointer move under
+SwiftShader, and deleted: it timed out at 240 s while proving nothing the cheap
+test does not.
+
+**Measured.** 318 boxes — 11 table, 229 seating, 72 planter, 6 modular; by wing
+A 148, B 73, D 81, C 16. Draw calls **11 → 15**, one per kind. Triangles
+**38,848 → 42,664**. Budget is 60 calls and 120k triangles.
+
+**Colour comes from the chrome tokens, never from `SEAT_STATUS_TOKENS`.** This
+furniture has no status and must never look as though it has one. It is pale and
+low-contrast on purpose: context, not content.
+
+**Cost, and what is invented.** The heights (table 0.74 m, seating 0.42 m,
+planter 0.5 m, modular 0.9 m) are guesses, like every other vertical dimension
+in this view — ASSUMPTIONS A23. So is the one classification rule: a 40-plan-unit
+(2.82 m) longest side splits `table` from `seating` inside `F-LOOSE FURNITURE`,
+because a boardroom table and a visitor's chair are the same CAD layer and the
+drawing does not label them. Nothing anybody sits on is that long. One
+consequence to know: the Zone B credenza run comes out as a 16.7 m `table`,
+which is the right shape and height and the wrong noun.

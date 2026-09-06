@@ -12,6 +12,7 @@
  */
 import detectedModulesJson from "@/data/floorplan/detected-modules.json";
 import detectionReportJson from "@/data/floorplan/detection-report.json";
+import furnitureJson from "@/data/floorplan/furniture.json";
 import metaJson from "@/data/floorplan/meta.json";
 import seatsJson from "@/data/floorplan/seats.json";
 import wallsJson from "@/data/floorplan/walls.json";
@@ -20,6 +21,7 @@ import {
   detectedModulesSchema,
   detectionReportSchema,
   floorplanMetaSchema,
+  furnitureSchema,
   seatAnchorsSchema,
   wallsSchema,
   zonesSchema,
@@ -28,6 +30,8 @@ import {
 export const floorplanMeta = floorplanMetaSchema.parse(metaJson);
 export const floorplanWalls = wallsSchema.parse(wallsJson);
 export const floorplanZones = zonesSchema.parse(zonesJson);
+/** Static furniture massing — context, never content. See ADR-044. */
+export const floorplanFurniture = furnitureSchema.parse(furnitureJson);
 export const floorplanSeatAnchors = seatAnchorsSchema.parse(seatsJson);
 export const floorplanDetectedModules = detectedModulesSchema.parse(detectedModulesJson);
 export const floorplanDetectionReport = detectionReportSchema.parse(detectionReportJson);
