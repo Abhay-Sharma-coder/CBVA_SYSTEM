@@ -40,9 +40,27 @@ export const BAYS: BayDef[] = [
 
 export const TOTAL_SEATS = BAYS.reduce((n, b) => n + b.count, 0); // 141
 
+/**
+ * ZONE NAMES — two now come from the drawing, two are still ours (A11).
+ *
+ * A and B were WRONG, and Phase 6's room labels put the contradiction on
+ * screen: Zone B was called "Boardroom & Conference" when the boardroom and
+ * all four meeting rooms are in Zone A, and Zone B is the flexible room —
+ * eight foldable tables on castors, a sofa lounge and the storage credenzas,
+ * with zero PAX annotations and zero workstation hatch anywhere in it. A wing
+ * labelled "Boardroom" beside a plan label reading "A3 Boardroom · 25 seats"
+ * in the OTHER wing is worse than no label at all.
+ *
+ * C and D are still inventions and are deliberately left alone. The drawing
+ * labels the wings A–D and never says what anybody in them does, so "Audit
+ * Floor" and "Tax & Advisory Floor" are ours — logged as such in ASSUMPTIONS
+ * A11 and in OPEN-QUESTIONS for the client to correct. They are kept because
+ * they orient a reader and because replacing them with bare "Zone C" would
+ * remove information without removing an unlogged claim.
+ */
 export const ZONES = [
-  { code: "A", displayName: "Zone A — Reception & Cabins", sortOrder: 1 },
-  { code: "B", displayName: "Zone B — Boardroom & Conference", sortOrder: 2 },
+  { code: "A", displayName: "Zone A — Boardroom & Meeting Rooms", sortOrder: 1 },
+  { code: "B", displayName: "Zone B — Flexible Room & Services", sortOrder: 2 },
   { code: "C", displayName: "Zone C — Audit Floor", sortOrder: 3 },
   { code: "D", displayName: "Zone D — Tax & Advisory Floor", sortOrder: 4 },
 ] as const;

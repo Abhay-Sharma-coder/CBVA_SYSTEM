@@ -429,3 +429,33 @@ describe("room labels", () => {
     expect(summary.length).toBeGreaterThan(80);
   });
 });
+
+/**
+ * The drawing confirms all 141, not 133 (Phase 6).
+ *
+ * `baysWithoutDrawingPax` has read ["A1","A2"] since Phase 2, and the handoffs
+ * repeated that only 133 seats were confirmed by an annotation. There is an
+ * `8 PAX` label 19.1 plan units from the A2 tag — exactly A1 + A2 in the bay
+ * schedule. It was invisible because seat detection skips every zone-A tag, a
+ * guard that is right for meeting rooms and threw out the one zone-A
+ * annotation that is a desk count.
+ */
+describe("the A1/A2 workstation run is annotated after all", () => {
+  it("reads the 8 PAX beside the A2 tag", () => {
+    expect(floorplanDetectionReport.workstationRunPax).toBe(8);
+  });
+
+  it("matches the bay schedule for the pair", () => {
+    const a1 = BAYS.find((b) => b.bay === "A1");
+    const a2 = BAYS.find((b) => b.bay === "A2");
+    expect((a1?.count ?? 0) + (a2?.count ?? 0)).toBe(
+      floorplanDetectionReport.workstationRunPax,
+    );
+  });
+
+  it("does not change what the seat detection derived", () => {
+    // Reported, not applied. The pair still totals 8 and the floor still 141.
+    expect(floorplanSeatAnchors.seats.filter((s) => s.bay === "A1" || s.bay === "A2")).toHaveLength(8);
+    expect(floorplanSeatAnchors.seats).toHaveLength(141);
+  });
+});

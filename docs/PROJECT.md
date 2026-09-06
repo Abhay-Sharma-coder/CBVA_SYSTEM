@@ -194,6 +194,30 @@ figure built on a guess.
 
 Deployed at https://cbva-workspace.vercel.app.
 
+**Phase 6 — Visual fidelity to the drawing ✅**
+No seat identity, no seat count, no booking logic, no analytics. The partition
+layer turned out to be 97% not partitions — 6,444 paths of which 200 are walls,
+separable by stroke colour, which the PDF parser had been discarding. The shell
+drops to 462 polygons with the envelope and every room divider intact. The
+meeting rooms are the five the drawing actually shows (A3 25, A9 10, A8 7, A7 5,
+A6 5) rather than six from a first reading, each carrying its bay code so the
+plan and `/rooms` join on the architect's tag rather than on a name CBVA will
+change. 318 pieces of static furniture — the boardroom table and its chair ring,
+the meeting rooms, both lounges, the foldable tables, the credenzas — so the two
+seatless wings stop reading as broken; none of it interactive, at four draw
+calls. Room labels in both views say why those wings have no desks.
+
+Two traps closed on the way: the "byte-identical" gate had been **vacuously
+green** since Phase 5 (it compared two builds to each other, never to the
+repository, while a rebuild silently reverted the A24 fix), and the drawing
+confirms all 141 seats rather than 133 — the `8 PAX` on the A1/A2 run was being
+skipped by the guard that keeps meeting-room capacities out of the desk count.
+
+**One step did not ship.** Typing each seat as rapid-rail or screen-only against
+the drawing's stated 93 and 4 does not reconcile — 34 of 141 anchors have no
+hatch of any colour near them. The gate said nothing ships if it does not
+reconcile, so nothing did. `PHASE-6-HANDOFF.md` §4 has the measurements.
+
 ## 9. Open questions
 
 See `ASSUMPTIONS.md`. The five that block real use:
@@ -204,7 +228,9 @@ See `ASSUMPTIONS.md`. The five that block real use:
 2. **Which physical desks are fixed**, so the plan shows the right ones reserved.
    Now visible: the plan draws 47 specific desks as reserved, in their real
    positions.
-3. **The real meeting rooms** — names, capacities and Outlook resource mailboxes.
+3. **The real meeting rooms** — 🟠 **partly closed in Phase 6.** The drawing
+   gives five rooms and their capacities. Still needed: the names CBVA uses, and
+   the Outlook resource mailbox for each.
 4. **Who owns meeting room booking — this app, or Outlook?** If the six rooms
    already exist as Outlook resource mailboxes, staff will go on booking them
    from Outlook, our grid will show the hour free, and two groups will arrive.
@@ -214,10 +240,11 @@ See `ASSUMPTIONS.md`. The five that block real use:
    ASSUMPTIONS A17. **This is new in Phase 3 and it is the one that can
    embarrass the product in front of staff.**
 
-5. **Does anybody sit in Zone B?** Phase 2 detected 33 unclaimed chairs in the
-   north-west wing, which the drawing marks "NO CHANGE AREA", labels "MODULAR
-   FURNITURE" and gives no pax count. Zone A's 46 unclaimed chairs *are*
-   explained — boardroom, conference rooms and reception lounge — but Zone B's
-   are not. If those are staff desks the bookable pool is 115–126 rather than
-   93, so utilisation is overstated by 24–36% relative. Full derivation in
-   ASSUMPTIONS A16.
+5. **Is Zone B used as a workspace on a normal day?** 🟠 **Downgraded in Phase
+   6.** Re-read at the vector level the wing has zero pax annotations, zero
+   workstation hatch of either type, 714 foldable-table hatch paths and the
+   drawing's own "foldable table on castors" note inside it — it is a flexible
+   room, and the 33 unexplained chairs are explained. Still open, because a
+   drawing cannot say whether staff work there daily; no longer load-bearing on
+   the denominator, so the headline number can be finalised on a pool of 93 once
+   question 1 closes. ASSUMPTIONS A16.

@@ -16,7 +16,10 @@ desks against headcount. Design every decision with that in mind.
 2. **CAD geometry pipeline and the interactive 2D floor plan** ✅ done
 3. **Booking engine, meeting rooms, auto-release, notifications** ✅ done
 4. **3D floor plan view** ✅ done
-5. Admin analytics, seat inventory, accessibility pass, deploy ← next
+5. **Admin analytics, seat inventory, accessibility pass, deploy** ✅ done
+6. **Visual fidelity to the architect's drawing** ✅ done — the partition layer
+   filtered by stroke colour, the real five meeting rooms, static furniture for
+   the two seatless wings, room labels
 
 ---
 
@@ -192,6 +195,29 @@ second seat pipeline.
 re-reads the architect's PDF. `seats.json` is the source of truth for seat
 geometry: the seed reads it, and `/admin/floor-plan` exports back to it so a
 hand correction survives `npm run db:reset` (ADR-017).
+
+**The build must reproduce the committed files, and "byte-identical" alone does
+not prove that.** Phase 5 fixed A24 by hand and the build silently stopped
+matching the repository for a whole phase, because the gate compared two
+consecutive BUILDS to each other — which a deterministic program always passes.
+The de-collide step is inside the pipeline now (ADR-043) and `validate()`
+refuses any build where two desks sit inside 1.30 m. Compare with
+`git diff --exit-code`, never `sha256sum`: this repo is checked out with
+`core.autocrlf=true`, so a hash of a checked-out file does not match its blob.
+
+**Colour on the CAD layers is a key, not decoration** (ADR-042).
+`P-FULLHEIGHT PARTITION` is 6,444 paths and 200 of them are walls; the rest is
+bench hatch, separated by stroke colour. `cadparse.py` retains stroke and fill
+and rides them on the `q`/`Q` stack **with** the ctm — a bare global leaks one
+block's colour into the next. Only the extruded shell filters: the baked texture
+and `planmask` still read the whole layer, and narrowing the mask would move
+`interiorCoverage`, `coreCentre` and every zone hull.
+
+**Static furniture is context and is never interactive** (ADR-044).
+`furniture.json` is oriented-box massing for everything that is not a bookable
+desk. Every mesh sets `raycast={() => null}` and none of it enters the DOM. If
+non-bookable furniture ever becomes clickable, somebody books the boardroom from
+the floor plan and two deliberately separate flows merge.
 
 **One colour map.** Seats take colour, border treatment and glyph from
 `SEAT_STATUS_TOKENS`. The greyscale and colour-vision guarantee proven on

@@ -170,6 +170,21 @@ export const detectionReportSchema = z.object({
     z.object({ drawingPax: z.number(), schedule: z.number() }),
   ),
   baysWithoutDrawingPax: z.array(z.string()),
+  /**
+   * The `8 PAX` annotation on the A1/A2 workstation run.
+   *
+   * `baysWithoutDrawingPax` has said ["A1","A2"] since Phase 2, and the
+   * handoffs repeated that the drawing confirms only 133 of the 141 seats.
+   * That was wrong: the annotation exists, 19.1 plan units from the A2 tag,
+   * and reads 8 — exactly A1 + A2 in the bay schedule. It was never seen
+   * because `bay_anchors` skips every zone-A tag, a guard that is right (it
+   * stops a meeting room's capacity becoming a desk count) and that threw out
+   * the one zone-A annotation which IS a desk count.
+   *
+   * Reported, never applied. It confirms the PAIR totals 8; how the 8 split
+   * between A1 and A2 is still ours.
+   */
+  workstationRunPax: z.number().int().nullable().optional(),
   seatsConfirmedByDrawingPax: z.number().int(),
   zoneBChairsDetected: z.number().int(),
   zoneBExpected: z.number().int(),

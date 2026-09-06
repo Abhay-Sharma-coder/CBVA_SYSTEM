@@ -8,17 +8,25 @@ file it affects so it can be found and changed when an answer arrives.
 > for somebody who has not read the code. This file stays the engineering
 > record — it names files and keeps the derivations.
 
+**Phase 6 status.** **A16 is DOWNGRADED** 🔴→🟠 — the drawing shows Zone B as a
+flexible room, and the headline number no longer waits on it. **A3 is PARTLY
+CLOSED** — five meeting rooms and their capacities now come from the drawing;
+the names and the Outlook mailboxes do not. **A11 had two wrong entries** and
+they are corrected. A23 grew four furniture heights. The client trio is now
+**A1** (the HR grade list), **A16** (reworded) and **A17** (who owns room
+booking).
+
 **Phase 5 status.** A22 is CLOSED (the auto-release job is bounded). A24 is
 PARTLY closed — the eleven desks no longer overlap, but their positions are
-still inferred. A1, A2, A3, A16 and A17 are all still open with the client and
-are now all answerable through the admin screens rather than through code.
+still inferred. A1, A2 and A17 remain open with the client and are answerable
+through the admin screens rather than through code.
 
 **Status key:** 🔴 blocking — the product is wrong until answered · 🟠 material —
 changes numbers or behaviour · 🟡 cosmetic — safe to leave.
 
 ---
 
-## 🔴 The four open client questions
+## The open client questions
 
 ### A1 — How do the 54 CAs split between Manager and Assistant Manager?
 
@@ -113,7 +121,50 @@ the architect's tag rather than on a display name CBVA is expected to change.
 
 ---
 
-### A16 — Does anybody sit in Zone B?
+### A16 — 🟠 DOWNGRADED in Phase 6 — Zone B is a flexible room, and it no longer gates the headline number
+
+**Assumed:** no bookable seats in Zone B.
+
+**What the drawing settles, re-read at the vector level.** Everything below is
+measured, not inferred from the layout:
+
+| | |
+|---|---|
+| `N PAX.` annotations anywhere in Zone B | **zero** |
+| `#FF0000` rapid-rail workstation hatch paths | **zero** |
+| `#0037DD` screen-only workstation hatch paths | **zero** |
+| `#4A9500` foldable-table hatch paths | **714** — more than the rest of the floor combined |
+| `F-LOOSE FURNITURE` subpaths | 427 |
+| the drawing's own note, inside this wing | *"Foldable table on castors: 2'-9" x 4'-0" = 5 nos, 2'-6" x 5'-0" = 3 nos"* |
+
+A wing with no pax count, no workstation hatch of either type, and eight
+foldable tables on castors is **a flexible room**, not a bank of desks. That is
+as far as a drawing can settle it.
+
+**So the question CBVA is asked has changed.** "Does anybody sit in Zone B?"
+invites a confused yes — of course people sit in it, it has chairs. The
+question now is:
+
+> **Zone B is drawn as a flexible room with eight foldable tables on castors.
+> Do staff work there on a normal day, or is it used only for training and
+> all-hands?**
+
+**Still open**, because if CBVA seats people there daily those desks become
+bookable and the pool moves. **No longer load-bearing on the denominator:** the
+Phase 5 headline number can be finalised on a pool of 93 once A1 closes, with
+this noted as an upside risk rather than an unknown of the same size. That is
+the change — from 🔴 blocking to 🟠 material.
+
+**What was 🔴 about it, for the record.** Phase 2's chair detector found 33
+unclaimed chairs here and nothing explained them; the sheet's
+"CONFERENCE AREA AND CAFETERIA NOT INCLUDED" note covers Zone A and not this
+wing. Thirty-three chairs around eight foldable tables and a sofa lounge is an
+ordinary thing for a flexible room to contain, which is the explanation that
+was missing.
+
+---
+
+### A16 (original derivation, retained)
 
 **Assumed:** no. Zone B has zero bookable seats.
 
@@ -324,12 +375,35 @@ before a multi-audience demo day.
 
 ## 🟡 Cosmetic — safe to leave, easy to change
 
-### A11 — Zone display names
+### A11 — Zone display names — 🟠 two were WRONG and are fixed; two are still ours
 
-**Assumed:** Zone A "Reception & Cabins", B "Boardroom & Conference",
-C "Audit Floor", D "Tax & Advisory Floor".
-**Affects:** `src/lib/seed-data/inventory.ts` → `ZONES`. The drawing labels the
-zones A–D but does not name their function.
+**Affects:** `src/lib/seed-data/inventory.ts` → `ZONES`.
+
+**A and B were wrong, not merely unconfirmed.** Phase 1 called Zone B
+"Boardroom & Conference". The drawing says the boardroom and all four meeting
+rooms are in **Zone A** (bays A3, A9, A8, A7, A6), and Zone B has zero PAX
+annotations and zero workstation hatch of either colour — it is the flexible
+room. Phase 6's room labels put the contradiction on screen: a wing labelled
+"Boardroom" beside a plan label reading "A3 Boardroom · 25 seats" in the *other*
+wing is worse than no label at all.
+
+| Zone | Was | Now | Evidence |
+|---|---|---|---|
+| A | Reception & Cabins | **Boardroom & Meeting Rooms** | the drawing's own A3/A6–A9 tags and PAX |
+| B | Boardroom & Conference | **Flexible Room & Services** | no PAX, no workstation hatch, the castors note, the K/L/M/Q/R rooms |
+| C | Audit Floor | Audit Floor | **none — ours** |
+| D | Tax & Advisory Floor | Tax & Advisory Floor | **none — ours** |
+
+**C and D are deliberately left alone, and this entry exists so that is a
+choice rather than an oversight.** The drawing labels the wings A–D and never
+says what anybody in them does, so both names are inventions. They are kept
+because they orient a reader, and because replacing them with bare "Zone C" and
+"Zone D" would remove information without removing an unlogged claim — they are
+logged here and in `OPEN-QUESTIONS.md` for CBVA to correct in one line.
+
+**The distinction now matters more than it did.** A and B are drawing-derived
+facts; C and D are guesses. Lumping all four together as "labels only", as this
+entry previously did, is what let a wrong one sit unexamined for five phases.
 
 ### A12 — Seat types per bay
 
@@ -570,6 +644,20 @@ plausible rather than obviously broken.
 **Assumed:** walls 2.7 m, partitions 1.35 m, glazing 2.7 m, desks 0.74 m high
 and 1.30 × 0.75 m, chairs 0.45 m to the seat. Wall extrusion widths are 70 mm
 for structure, 55 mm for partitions and 40 mm for glazing.
+
+**Phase 6 added four more, and one classification rule.** Static furniture
+heights: tables 0.74 m, seating 0.42 m, planters 0.5 m, modular 0.9 m. They only
+have to be plausible and *different enough that a table does not read as a
+planter*.
+
+The rule is sharper than the numbers and worth stating: inside
+`F-LOOSE FURNITURE` a longest side of **40 plan units (2.82 m)** separates
+`table` from `seating`. A boardroom table and a visitor's chair are on the same
+CAD layer and the drawing does not label them, so something had to decide.
+Nothing anybody sits on is 2.8 m long, which is why the threshold is safe in one
+direction — but it is a guess, and one known consequence is that Zone B's
+storage credenza run comes out as a 16.7 m "table": right shape, right height,
+wrong noun.
 
 **Affects:** `src/components/floor-plan/three/coords.ts` → `DIMENSIONS`.
 

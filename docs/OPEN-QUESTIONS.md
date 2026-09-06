@@ -35,30 +35,37 @@ person; nothing is deployed.
 
 ---
 
-## 2. Does anybody sit in Zone B?
+## 2. Is Zone B used as a workspace on a normal day?
 
-**We assumed** no. Zone B — the north-west wing — has zero bookable desks in the
-product today.
+**We now know what it is.** We went back to your furniture layout and read it at
+the vector level. Zone B — the north-west wing — is drawn as a **flexible
+room**, and the drawing is unusually clear about it:
 
-**Why we are unsure.** The drawing marks that wing "NO CHANGE AREA — ONLY REPAIR
-WORK", gives it no pax count, and labels it "MODULAR FURNITURE", which is
-workstation language rather than lounge language. Our chair detector found 33
-chairs there that nothing else explains.
+| | |
+|---|---|
+| Seat-count annotations anywhere in the wing | **none** |
+| Workstation hatch (either type in your legend) | **none** |
+| Foldable-table hatch | **714 marks — more than the rest of the floor combined** |
+| Your own note, inside this wing | *"Foldable table on castors: 2'-9" x 4'-0" = 5 nos, 2'-6" x 5'-0" = 3 nos"* |
 
-For comparison, Zone A also has unexplained chairs and they are *not* a
-question: the architect's own title block says
-`NOTE: CONFERENCE AREA AND CAFETERIA NOT INCLUDED`, immediately under the
-141-pax total, which accounts for the boardroom, the two conference rooms and
-the reception lounge. Zone B is not covered by that note.
+So the 33 chairs we could not explain last time are explained: eight foldable
+tables on castors, a sofa lounge, and the storage credenzas along the outer
+wall. That wing is now drawn with all of it, and labelled, so you can see what
+we are describing.
 
-**What changes if the answer is yes.** The bookable pool moves from 93 to
-somewhere between 115 and 126 depending on how those desks split between
-allocated and bookable. Every utilisation percentage currently reported is then
-**overstated by 24–36% relative** — a peak of 76 out of 93 (82%) becomes 76 out
-of 115 (66%), which is a different conversation about desk count.
+**What we still cannot tell from a drawing** is how you use it. So the question
+is no longer "does anybody sit there":
 
-**One sentence closes it:** are the ~33 desks in the north-west wing occupied by
-staff, and if so by how many?
+> **Zone B is drawn as a flexible room with eight foldable tables on castors.
+> Do staff work there on a normal day, or is it used only for training and
+> all-hands?**
+
+**Why it matters less than it did.** We can now finalise the occupancy figures
+against a bookable pool of 93 rather than holding them back. If you tell us
+staff work there daily, those desks become bookable and every percentage comes
+down — but that is an upside correction we can apply later, not a reason to
+distrust the numbers now. Previously this question and question 1 together were
+holding up the headline figure. Now only question 1 is.
 
 ---
 
@@ -110,17 +117,33 @@ dropdown; it takes about five minutes for all 47.
 
 ---
 
-## 5. Are the six meeting rooms right, and what are they called?
+## 5. What are the five meeting rooms called?
 
-**We assumed** Boardroom (25), Conference A (10), Conference B (8), Meeting Room
-1 (7), Meeting Room 2 (6), Huddle Room (4).
+**Corrected since we last wrote.** We had six rooms from a first reading of the
+drawing: Boardroom 25, Conference A 10, Conference B 8, Meeting Room 1 7,
+Meeting Room 2 6, Huddle Room 4. Re-reading it properly, there are **five**, all
+in Zone A, and each one is tagged and counted on your own drawing:
 
-The **capacities are read off the pax annotations in the drawing**. The **names
-are entirely ours** — you will have your own, probably after clients or partners.
+| Bay | Seats | What we are calling it |
+|---|---|---|
+| A3 | 25 | Boardroom |
+| A9 | 10 | Meeting Room A9 |
+| A8 | 7 | Meeting Room A8 |
+| A7 | 5 | Meeting Room A7 |
+| A6 | 5 | Meeting Room A6 |
 
-We also need the **Outlook room resource mailbox** for each one. It is null on
-all six rows today, which is what blocks the calendar sync regardless of how
-question 3 is answered.
+Two of our capacities were wrong and one room did not exist. **The counts are
+now yours, not ours** — they come from the pax annotations beside each bay tag,
+and they reconcile: 25+10+7+5+5 = 52, plus the 8-seat workstation run in A1/A2
+is 60, which is exactly the zone-A total on the sheet.
+
+**Two things we still need:**
+
+1. **The names.** We have used your bay tags rather than inventing names, so
+   "Meeting Room A9" is a placeholder you can replace. You will have your own.
+2. **The Outlook room resource mailbox** for each one. Null on all five rows,
+   and it is what blocks the calendar sync regardless of how question 3 is
+   answered.
 
 ---
 
@@ -252,7 +275,7 @@ D7-04, D8-04.
 |---|---|---|
 | **Email format** | `firstname.lastname@cbva.in` | Nothing until cutover, when `users.email` becomes the join key to your Entra tenant |
 | **Everyone is on Floor 4** | One active floor | Adding another is data, not a migration |
-| **Zone names** | A "Reception & Cabins", B "Boardroom & Conference", C "Audit Floor", D "Tax & Advisory" | Labels only |
+| **Zone names for C and D** | C "Audit Floor", D "Tax & Advisory" | Labels only, and **these two are guesses** — your drawing labels the wings A–D and never says what the people in them do. A and B we have corrected from the drawing: Zone A is the boardroom and meeting rooms, Zone B the flexible room. |
 | **Desk types per bay** | Passage seats on PA/PD, cabins in A1/A2/D5, foldables in C7 | Cosmetic. The C7 foldables are a guess made so the type has a live example |
 | **One blocked desk (PD-18)** | Out of service | Entirely invented, so the status has a live example and capacity is not simply the desk count |
 | **Office hours 08:00–20:00** | The bounds of the meeting-room grid | Only the columns the grid draws |
@@ -266,10 +289,12 @@ D7-04, D8-04.
 
 If you can only answer three things:
 
-1. **The HR list** (question 1) — it is the denominator for everything.
-2. **Zone B** (question 2) — one sentence, and it moves every percentage.
-3. **Who owns room booking** (question 3) — the one that can embarrass the
+1. **The HR list** (question 1) — it is the denominator for everything, and it
+   is now the *only* thing holding the headline figure back.
+2. **Who owns room booking** (question 3) — the one that can embarrass the
    product in front of staff.
+3. **Zone B** (question 2) — one sentence. It no longer blocks the numbers, but
+   it decides whether the bookable pool is 93 or nearer 115.
 
 Questions 4, 5, 6 and 8 are all now screens in the admin area. You can answer
 them yourselves in an afternoon, and nothing needs to be deployed.
