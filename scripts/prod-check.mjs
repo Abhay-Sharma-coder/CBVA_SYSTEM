@@ -110,5 +110,65 @@ export function evaluateProduction(counts, migrations) {
     warnings.push("no live seat releases — the seed usually leaves some");
   }
 
+  /*
+   * THE DISTRIBUTION GUARD (Phase 8 / B2) — the third guard this project has
+   * added only after the failure it exists to catch.
+   *
+   * Phase 7 pointed the e2e suite at production by accident and it
+   * auto-released 65 of 95 bookable desks on the demo date. Every count above
+   * stayed healthy throughout — 141/141/93, ~5,800 bookings, 5 rooms — and
+   * `evaluateProduction` reported "looks presentable" because nothing here
+   * asked what SHAPE the bookings were in, only how many there were. A count
+   * guard sees data go missing; it is blind to the same data being present
+   * but wrong.
+   *
+   * WHY "TODAY" AND NOT A RUNNING RATIO. `auto_released` is not a count that
+   * accumulates the way "12% of bookings are no-shows" suggests — it is a
+   * SNAPSHOT of no-shows caught while their slot was still running, and once
+   * assigned it never changes (auto-release.ts only ever transitions OUT of
+   * `confirmed`, never into or out of `auto_released` again). Once a day is
+   * fully over, its no-shows settle to `completed_no_show` instead — that is
+   * the OTHER terminal status, and it is the one that accumulates with the
+   * calendar. So `auto_released` is concentrated on the current day (and
+   * briefly on the one just before it), not spread evenly across a trailing
+   * window — a ratio measured over 21 days would dilute today's damage with
+   * three weeks of `completed_no_show` history that was never in danger.
+   *
+   * Measured, not assumed: against the actual seeded database, a single
+   * day's `auto_released` count sits at 19–27% of bookable capacity in the
+   * worst slot observed. 40% clears that with real margin and is nowhere
+   * near the 68% (65 of 95) the incident actually produced.
+   */
+  if (counts.bookable > 0 && counts.auto_released_today !== undefined) {
+    const todayRatio = counts.auto_released_today / counts.bookable;
+    if (todayRatio > 0.4) {
+      failures.push(
+        `${counts.auto_released_today} of ${counts.bookable} bookable desks ` +
+          `(${Math.round(todayRatio * 100)}%) are auto_released for today — far more than a ` +
+          `12% no-show rate explains in one day. This is the shape of the 65/95 incident: ` +
+          `something (an e2e run against this database, a demo clock left advanced) has ` +
+          `auto-released the floor wholesale rather than the real 2-hour rule doing it one ` +
+          `booking at a time. Check for a stray clock offset and re-seed if this is the demo.`,
+      );
+    }
+  }
+
+  /*
+   * The other direction — auto-release having quietly stopped happening at
+   * all — is a real risk (A26: a settings edit can put the grace window
+   * longer than the slot) but a much noisier signal at the "today" grain,
+   * since a healthy morning can legitimately show zero before anyone's grace
+   * window has expired yet. A warning, not a failure, over fourteen days —
+   * long enough that zero against a real population is worth a look without
+   * blocking a deploy someone is running at 9:05am.
+   */
+  if (counts.recent_held > 100 && counts.recent_auto_released === 0) {
+    warnings.push(
+      `zero auto_released bookings in the last 14 days against ${counts.recent_held} ` +
+        `held — is the cron running, or has auto_release_minutes drifted past the slot ` +
+        `length (A26)?`,
+    );
+  }
+
   return { failures, warnings };
 }

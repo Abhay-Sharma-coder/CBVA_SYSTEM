@@ -27,7 +27,7 @@ import {
 import { FLOOR_SIZE } from "@/components/floor-plan/three/coords";
 import { SceneControls } from "@/components/floor-plan/three/scene-controls";
 import type { FloorPlanSeat } from "@/components/floor-plan/types";
-import { FULL_FLOOR_BOUNDS, zoneBounds, type ZoneCode } from "@/lib/floorplan";
+import { FULL_FLOOR_BOUNDS, zoneSeatBounds, type ZoneCode } from "@/lib/floorplan";
 import {
   LOD_3D_ENTER_BAY,
   LOD_3D_EXIT_BAY,
@@ -50,6 +50,8 @@ export interface Scene3DProps {
   onActivateSeat: (seat: FloorPlanSeat) => void;
   onContextLost: () => void;
   onFailure: () => void;
+  showOccupancyLabels?: boolean;
+  showRoomLabels?: boolean;
   className?: string;
   /** Announced on the canvas itself, never on a wrapper holding controls. */
   ariaLabel: string;
@@ -77,6 +79,8 @@ export default function Scene3D(props: Scene3DProps) {
     onActivateSeat,
     onContextLost,
     onFailure,
+    showOccupancyLabels = false,
+    showRoomLabels = true,
     className,
     ariaLabel,
   } = props;
@@ -300,7 +304,7 @@ export default function Scene3D(props: Scene3DProps) {
           Room labels, so a wing with no desks reads as "meeting rooms" rather
           than as a fault. One merged mesh over one strip atlas: one draw call.
         */}
-        <RoomLabels palette={palette} />
+        {showRoomLabels && <RoomLabels palette={palette} />}
         {/*
           The far half of the LOD switch. At whole-floor framing a desk is a
           few pixels across and its status glyph is sub-pixel, so instead of
@@ -309,7 +313,7 @@ export default function Scene3D(props: Scene3DProps) {
           over one strip atlas, so this REPLACES up to six glyph meshes with
           one and the draw-call count goes down, not up.
         */}
-        {lod === "bay" && <BayPlates seats={seats} palette={palette} />}
+        {lod === "bay" && showOccupancyLabels && <BayPlates seats={seats} palette={palette} />}
         <Seats
           seats={seats}
           palette={palette}
@@ -341,11 +345,17 @@ export default function Scene3D(props: Scene3DProps) {
         />
 
         <PerfProbe lod={lod} />
-        <LodDirector controls={controls} lod={lod} onChange={setLod} />
+        <LodDirector
+          controls={controls}
+          lod={lod}
+          onChange={setLod}
+          activeZone={activeZone}
+        />
         <CameraDirector
           controls={controls}
           reduceMotion={reduceMotion}
           activeZone={activeZone}
+          seats={seats}
           focusSeat={seats.find((s) => s.seatCode === selectedSeatCode) ?? null}
           view={view}
           refit={refit}
@@ -392,17 +402,34 @@ export default function Scene3D(props: Scene3DProps) {
  *
  * CameraDirector owns camera FLIGHT and this owns what the camera's position
  * MEANS; they are kept apart so a flight in progress cannot suppress a switch.
+ *
+ * A4: an EXPLICIT zone selection forces seat detail regardless of distance.
+ * `zoneBounds`'s convex hull used to inflate the fit-to-zone framing enough
+ * that a wing routinely landed just inside "bay" — chips, not desks, on the
+ * screen a zone picker exists to show desks on. The fit is tight to the
+ * zone's own seats now (see CameraDirector's `flyToZone` below) and clears
+ * the exit threshold with margin on every viewport this scene actually
+ * renders at, but picking a zone is a distinct signal from ambient orbiting
+ * either way — "show me this wing's desks" — so it bypasses the hysteresis
+ * outright rather than trusting a distance number to land on the right side
+ * of it every time.
  */
 function LodDirector({
   controls,
   lod,
   onChange,
+  activeZone,
 }: {
   controls: React.RefObject<OrbitControlsImpl | null>;
   lod: LodLevel;
   onChange: (next: LodLevel) => void;
+  activeZone: ZoneCode | null;
 }) {
   useFrame(({ camera }) => {
+    if (activeZone) {
+      if (lod !== "seat") onChange("seat");
+      return;
+    }
     const target = controls.current?.target;
     if (!target) return;
     const next = resolveLod(
@@ -420,6 +447,7 @@ function CameraDirector({
   controls,
   reduceMotion,
   activeZone,
+  seats,
   focusSeat,
   view,
   refit,
@@ -428,6 +456,7 @@ function CameraDirector({
   controls: React.RefObject<OrbitControlsImpl | null>;
   reduceMotion: boolean;
   activeZone: ZoneCode | null;
+  seats: FloorPlanSeat[];
   focusSeat: FloorPlanSeat | null;
   view: "free" | "topDown";
   refit: number;
@@ -449,10 +478,14 @@ function CameraDirector({
 
   const flyToZone = useCallback(
     (zone: ZoneCode | null, polar: number) => {
-      const rect = zone ? zoneBounds(zone) : FULL_FLOOR_BOUNDS;
+      // Tight to the zone's own desks (A4), not the convex hull's bounding
+      // box — the hull fans out from the interior centroid, so its bbox
+      // drags in the core and overlaps the neighbouring zone by ~32 plan
+      // units, inflating the frame enough to land the fit in bay detail.
+      const rect = zone ? zoneSeatBounds(seats, zone) : FULL_FLOOR_BOUNDS;
       flyTo(frameRect(rect, aspect, polar, AZIMUTH_DEFAULT), 0.75);
     },
-    [aspect, flyTo],
+    [aspect, flyTo, seats],
   );
 
   // The zone filter is shared state: choosing Zone C on the 2D plan and then

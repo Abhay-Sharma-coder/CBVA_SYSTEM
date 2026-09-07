@@ -31,26 +31,32 @@ for more desks than you need?
 Here is the structure of it, which is worth understanding before you answer,
 because it is not obvious:
 
-> **The bookable pool and the number of people who must book are the same
-> quantity, seen from two ends.** Floor 4 has 141 desks. Every desk is either
-> allocated to somebody at Manager grade or above, or it is in the bookable
-> pool. Every person is either one of those fixed-seat holders, or they must
-> book. So both numbers are *141 minus the fixed count* — **they move together,
-> and they balance at any split.**
+> **The 93 bookable desks are a fixed, physical fact — which specific 47
+> desks are allocated to fixed grades, plus one (PD-18) out of service,
+> leaving 93 in the pool.** That does not move when the headcount split
+> changes. What moves is DEMAND: how many people the true split puts into a
+> bookable grade.
 
-That balance is therefore **not a finding.** It is arithmetic, and our report
-would show it whatever we guessed. What the split actually decides is whether
-that balance is comfortable or precarious:
+So the desk supply is not the unknown here — 93 is measured against the
+running system, not assumed. What the split actually decides is whether that
+fixed supply is comfortable or precarious:
 
-| If the real split is | People who must book | Bookable desks | The floor is |
+| If the real split is | People who must book | Against 93 bookable desks | The floor is |
 |---|---|---|---|
-| 22 / 32 (our guess) | 94 | 94 | exactly balanced, no slack |
-| 15 / 39 | 101 | 94 | **structurally short by 7** |
-| 30 / 24 | 86 | 102 | 16 desks of slack |
+| 22 / 32 (our guess, current) | 94 | 93 | **short by 1** |
+| 15 / 39 | 101 | 93 | **structurally short by 8** |
+| 30 / 24 | 86 | 93 | 7 desks of slack |
 
-The middle row is close to the opposite conclusion from the first. We are not
-willing to hand a partner a capacity finding built on a number we invented, so
-until this arrives the headline figure carries a caveat on screen.
+**Even on our own guessed split, the floor is one desk short, not exactly
+balanced** — 94 people (32 Assistant Managers + 62 Articles) must book
+against 93 bookable desks. That one-desk gap is too small to be the finding
+by itself, and it is here so the table is honest about what is actually
+seeded today rather than the rounder "exactly balanced" a whole-number split
+suggests. The real range — from a 1-desk shortfall to an 8-desk shortfall to
+a 7-desk surplus, depending on where the true split falls — is the finding.
+We are not willing to hand a partner a capacity number built on a split we
+invented, so until this arrives the headline figure carries a caveat on
+screen.
 
 **Where the answer goes:** Admin → People. Grade and seat mode are editable per
 person. Nothing is deployed.

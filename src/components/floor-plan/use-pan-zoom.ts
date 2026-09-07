@@ -24,6 +24,13 @@ export const MAX_SCALE = 6;
 const FIT_MIN_SCALE = 0.12;
 
 /**
+ * How far a pointer may move before a press-on-a-seat becomes a pan instead
+ * of a tap. In CSS pixels, so it means the same thing on a hi-DPI phone as on
+ * a mouse.
+ */
+const DRAG_SLOP_PX = 8;
+
+/**
  * Pan and zoom over the plan.
  *
  * The whole layer moves as one CSS transform. Nothing is re-laid-out on pan or
@@ -38,6 +45,27 @@ export function usePanZoom(initial?: Rect) {
   const drag = useRef<{ id: number; x: number; y: number; tx: number; ty: number } | null>(
     null,
   );
+  /**
+   * A press that landed on a SEAT, not yet proven to be a drag.
+   *
+   * Pointer capture is deliberately not requested for this pointer until it
+   * crosses DRAG_SLOP_PX (see onPointerMove) — a seat is a real <button> and
+   * a tap on it has to reach that button's own native click undisturbed. On a
+   * phone at fit-to-floor the 141 seat markers nearly tile the surface, so
+   * without this a touch that starts on a seat could never begin a pan at
+   * all: the old behaviour bailed out of pan-tracking entirely for any
+   * pointerdown on `[data-seat]`.
+   */
+  const pending = useRef<{ id: number; x: number; y: number } | null>(null);
+  /**
+   * Set the instant a pending press upgrades to a drag, so a stray native
+   * `click` — should pointer capture and the click event disagree about which
+   * element the pointer "belongs to", which is not something to assume either
+   * way across browsers — is swallowed by onClickCapture below rather than
+   * quietly activating whichever desk the pointer happened to end the drag
+   * over.
+   */
+  const suppressClick = useRef(false);
   const framed = useRef(false);
 
   useLayoutEffect(() => {
@@ -81,6 +109,26 @@ export function usePanZoom(initial?: Rect) {
     setTransform(fitTo(initial ?? FULL_FLOOR_BOUNDS));
   }, [fitTo, initial, size.width]);
 
+  /**
+   * `setPointerCapture` throws `InvalidPointerId` if the browser no longer
+   * considers this pointer active — reachable in the real world (a system
+   * gesture cancelling mid-touch, a lost pointer on some Android WebViews),
+   * not only in a synthetic test. Uncaught, that throw happens inside a React
+   * event handler and inside a `setTransform` updater, which is not a place
+   * this app can afford to crash from over a gesture that simply did not
+   * pan. Failing closed — no capture, no drag started — is the safe answer:
+   * the tap this pointer was probably trying to be still works normally,
+   * because nothing here touched it.
+   */
+  const trySetPointerCapture = (el: HTMLElement, pointerId: number) => {
+    try {
+      el.setPointerCapture(pointerId);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const zoomAt = useCallback((factor: number, originX?: number, originY?: number) => {
     setTransform((t) => {
       const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor));
@@ -93,15 +141,25 @@ export function usePanZoom(initial?: Rect) {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // Only bare plan starts a pan. Capturing the pointer on the container
-    // stops a `click` ever reaching anything inside it, so seats and the
-    // overlaid zoom controls have to be excluded here or they go dead.
-    if ((e.target as HTMLElement).closest("[data-seat], button, a, input, select, textarea")) {
+    // Real controls overlaid on the plan — zoom buttons, the editor's form
+    // fields — must never start a pan-or-tap gesture. `button:not([data-seat])`
+    // is what lets a SEAT (also a <button>) fall through to the branch below
+    // instead of being excluded alongside them; the exclusion for everything
+    // else is unchanged.
+    const target = e.target as HTMLElement;
+    if (target.closest("button:not([data-seat]), a, input, select, textarea")) {
       return;
     }
+    suppressClick.current = false;
+
+    if (target.closest("[data-seat]")) {
+      // A press on a seat. Record it and wait — see the `pending` ref comment.
+      pending.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      return;
+    }
+
     const el = containerRef.current;
-    if (!el) return;
-    el.setPointerCapture(e.pointerId);
+    if (!el || !trySetPointerCapture(el, e.pointerId)) return;
     setTransform((t) => {
       drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, tx: t.x, ty: t.y };
       return t;
@@ -109,6 +167,25 @@ export function usePanZoom(initial?: Rect) {
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const p = pending.current;
+    if (p && p.id === e.pointerId) {
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      if (Math.hypot(dx, dy) < DRAG_SLOP_PX) return;
+      // Crossed the slop: this press is a pan, not a tap. Capture from THIS
+      // point — the current transform and the current pointer position —
+      // rather than from where the press started, so the plan does not jump
+      // by the slop distance the instant the drag is recognised.
+      pending.current = null;
+      const el = containerRef.current;
+      if (!el || !trySetPointerCapture(el, e.pointerId)) return;
+      suppressClick.current = true;
+      setTransform((t) => {
+        drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, tx: t.x, ty: t.y };
+        return t;
+      });
+      return;
+    }
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     setTransform((t) => ({
@@ -119,9 +196,28 @@ export function usePanZoom(initial?: Rect) {
   }, []);
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (pending.current?.id === e.pointerId) {
+      // Released inside the slop radius: a genuine tap. This pointer was
+      // never captured, so the seat's own native click fires on its own —
+      // there is nothing to do here but stop tracking it.
+      pending.current = null;
+      return;
+    }
     if (drag.current?.id !== e.pointerId) return;
     drag.current = null;
     containerRef.current?.releasePointerCapture?.(e.pointerId);
+  }, []);
+
+  /**
+   * The safety net for the "did a click survive pointer capture" question
+   * onPointerMove above deliberately does not answer by assumption. Capture
+   * phase, so it runs before the click reaches a seat button underneath it.
+   */
+  const onClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!suppressClick.current) return;
+    suppressClick.current = false;
+    e.stopPropagation();
+    e.preventDefault();
   }, []);
 
   // Non-passive so ctrl+wheel pinch-zoom does not zoom the whole page instead.
@@ -151,6 +247,7 @@ export function usePanZoom(initial?: Rect) {
       onPointerMove,
       onPointerUp: endDrag,
       onPointerCancel: endDrag,
+      onClickCapture,
     },
   };
 }

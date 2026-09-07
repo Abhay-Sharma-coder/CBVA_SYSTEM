@@ -46,19 +46,29 @@ drawing", that is exactly the intent.*
 **Start zoomed out and say what you are looking at, because the plan answers a
 different question here.**
 
-> "At this zoom you are not picking a desk, you are reading the floor. Each bay
-> shows how many of its bookable desks are taken — eight of sixteen on the
-> passage run, nine of seventeen down there. That is the whole floor in one
-> glance."
+> "At this zoom you are not picking a desk, you are reading the floor. Every
+> desk paints as a plain dot — filled if it is held, hollow if it is free —
+> so you can tell a busy wing from a quiet one at a glance without needing to
+> read a single number."
 
-- **Zoom in twice.** The bay counts fade out and the per-desk statuses appear.
+- **Point at "Occupancy labels" in the controls, off by default.** Switch it
+  on.
+
+> "Turn this on and the same read gets a number attached — each bay's exact
+> count, like 'eight of sixteen' on the passage run. Off by default, because
+> the dot pattern already answers 'how full,' and the plan starts quieter for
+> it. On, when you want the precise count."
+
+- **Zoom in twice.** The dots and bay chips fade out and the per-desk statuses
+  appear.
 
 > "Now you are choosing a desk, so now it shows you desks."
 
 *Why this matters, if anybody asks: at whole-floor zoom a desk is about eleven
 pixels across. Seven different statuses at eleven pixels is a colour chart
-nobody can read. So past a threshold it stops trying and answers the question
-that zoom actually asks.*
+nobody can read. So past a threshold it stops trying and answers the density
+question instead — with a dot pattern that needs no toggle, and a number that
+does.*
 
 - Point at the **legend**. Note that every status has a **shape or a glyph as
   well as a colour** — these screens get printed in greyscale.
@@ -73,8 +83,9 @@ that zoom actually asks.*
 > "Looking straight down, this is the drawing again. That is the point of the
 > 3D view: it is faithful, not decorative."
 
-*The bay counts are there in 3D too, lying flat in the plan, and they hand over
-to per-desk status as you fly in — the same threshold, the same rule.*
+*The same dot pattern and the same occupancy-labels toggle are there in 3D
+too, and they hand over to per-desk status as you fly in — the same
+threshold, the same rule, one shared switch for both renderings.*
 
 - Switch back to **Plan**.
 

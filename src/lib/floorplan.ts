@@ -94,6 +94,39 @@ export function zoneBounds(code: ZoneCode) {
 }
 
 /**
+ * A zone's bounding box, tight to its own SEATS rather than to `zoneBounds`'s
+ * convex hull (A4, Phase 8).
+ *
+ * The hull each zone carries in `zones.json` is built by fanning out from the
+ * building's interior centroid (`tools/cad/build_floorplan.py` `build_zones`),
+ * so every hull includes the core and adjacent zone rectangles overlap it by
+ * roughly 32 plan units once `zoneBounds`'s own padding is added. That is
+ * enough to push a zone-focus fit below `LOD_2D_EXIT_BAY` / `LOD_3D_EXIT_BAY`,
+ * landing a zone selection in bay/chip detail instead of per-seat — the
+ * opposite of what picking a zone is for.
+ *
+ * This is the tightest fit a zone can have — it is built from the desks
+ * themselves — and needs no change to the committed geometry: it fixes the
+ * zone-view LOD problem at every viewport down to about 490px wide purely by
+ * dropping the core overlap. Below that width the wing's own physical extent
+ * (not the hull) is what does not fit; see the LOD-forcing note beside the
+ * callers of this function.
+ */
+export function zoneSeatBounds(
+  seats: ReadonlyArray<{ zone: ZoneCode; planX: number; planY: number }>,
+  code: ZoneCode,
+  pad = 24,
+) {
+  const points = seats
+    .filter((s) => s.zone === code)
+    .map((s) => [s.planX, s.planY] as const);
+  // Zone B has no bookable seats at all — its "zone view" is the room labels,
+  // and there is nothing to fit tightly to, so fall back to the hull bbox.
+  if (points.length === 0) return zoneBounds(code);
+  return boundsOf(points, pad);
+}
+
+/**
  * Nearest detected chair block to a point, within `maxDistance` plan units.
  * This is what "snap to nearest detected workstation" in the editor uses, and
  * it searches every module the extraction found — including ones no seat was

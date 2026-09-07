@@ -60,7 +60,13 @@ const COLOURS = [
 
 const DERIVED = [
   { name: "Navy Tint", swatch: "bg-navy-tint", usage: "Booked seat fill, subtle emphasis." },
-  { name: "Navy Tint Strong", swatch: "bg-navy-tint-strong", usage: "Your booking fill, selection." },
+  { name: "Navy Tint Strong", swatch: "bg-navy-tint-strong", usage: "Text selection." },
+  {
+    name: "Navy Yours",
+    swatch: "bg-navy-yours",
+    usage:
+      "Your booking fill. Darker than a tint on purpose — measured against the baked plan at 3.29:1 as a graphical object, clearing WCAG 1.4.11's 3:1 (was 1.29:1 at the lighter tint).",
+  },
   { name: "Ink Muted", swatch: "bg-ink-muted", usage: "Secondary text." },
   { name: "Ink Subtle", swatch: "bg-ink-subtle", usage: "Tertiary text, placeholders." },
   { name: "Surface", swatch: "bg-surface", usage: "Cards and panels." },

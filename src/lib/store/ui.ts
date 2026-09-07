@@ -60,6 +60,28 @@ interface UiState {
   /** Demo controls panel, collapsed by default so it stays out of the way. */
   demoPanelOpen: boolean;
   toggleDemoPanel: () => void;
+
+  /**
+   * Two independent label toggles (Phase 8 / A1), each answering a different
+   * question and defaulting differently on purpose:
+   *
+   * - Occupancy labels (the bay chips + shading) are the Phase 7 LOD density
+   *   read at whole-floor zoom. Default OFF — the plan starts quieter, and the
+   *   non-text bay shading (`BayDensity`'s fill, always on) still answers "how
+   *   full is the floor" without the numerals.
+   * - Room labels are Phase 6 wayfinding for zones A and B, which have no
+   *   bookable desks at all. Default ON — without them those wings read as
+   *   broken rather than as a boardroom and a flexible room.
+   *
+   * Session-only, deliberately: in-memory Zustand state, not persisted to
+   * localStorage or a database column. It survives zone changes and 2D/3D
+   * switches within a visit and resets on reload — "per user" here means "for
+   * as long as they are looking at the floor", not "forever on this device".
+   */
+  showOccupancyLabels: boolean;
+  setShowOccupancyLabels: (v: boolean) => void;
+  showRoomLabels: boolean;
+  setShowRoomLabels: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -81,4 +103,9 @@ export const useUiStore = create<UiState>((set) => ({
   setViewport: (viewport) => set({ viewport }),
   demoPanelOpen: false,
   toggleDemoPanel: () => set((s) => ({ demoPanelOpen: !s.demoPanelOpen })),
+
+  showOccupancyLabels: false,
+  setShowOccupancyLabels: (v) => set({ showOccupancyLabels: v }),
+  showRoomLabels: true,
+  setShowRoomLabels: (v) => set({ showRoomLabels: v }),
 }));

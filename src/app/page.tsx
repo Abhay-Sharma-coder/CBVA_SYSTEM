@@ -4,8 +4,7 @@ import { db, schema } from "@/lib/db";
 import { getClock } from "@/lib/clock";
 import { auth } from "@/lib/adapters";
 import { APP_TIMEZONE } from "@/lib/config";
-import { Card, CardBody, CardHeader, CardTitle, Badge } from "@/components/ui/primitives";
-import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/primitives";
 import { GRADE_LABEL } from "@/lib/seed-data/inventory";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +17,35 @@ const dateFormatter = new Intl.DateTimeFormat("en-IN", {
   year: "numeric",
 });
 
+const NAV_CARDS = [
+  {
+    href: "/floor",
+    label: "Floor Map",
+    description: "The architect's own drawing, live booking status, 2D or 3D.",
+  },
+  {
+    href: "/bookings",
+    label: "My Bookings",
+    description: "Upcoming and past, check in, edit, cancel, or release your desk.",
+  },
+  {
+    href: "/who",
+    label: "Who's In",
+    description: "Who is booked into the office today, and where they sit.",
+  },
+  {
+    href: "/rooms",
+    label: "Meeting Rooms",
+    description: "The five rooms in Zone A, by the hour.",
+  },
+] as const;
+
 /**
- * Phase 1 landing page. Deliberately thin — it exists to prove the shell, the
- * adapters, the clock and the seed are all wired to each other. The numbers are
- * real reads against the seeded database, not placeholders.
+ * Home. Signed out, it is the front door — the full CBVA lockup and a
+ * one-line description (Phase 8 / A2; there is no separate sign-in page, the
+ * demo's "sign in" is the role switcher, top right). Signed in, it is a
+ * live-data landing: today's numbers, real reads against the seeded
+ * database, and the four screens most people actually open.
  */
 export default async function HomePage() {
   const clock = await getClock();
@@ -59,30 +83,42 @@ export default async function HomePage() {
   const bookedToday = Number(todayStats?.booked ?? 0);
   const utilisation = bookable > 0 ? Math.round((bookedToday / bookable) * 100) : 0;
 
+  if (!user) {
+    return (
+      <div className="space-y-10">
+        <section className="space-y-4 border-b border-hairline pb-8">
+          {/* eslint-disable-next-line @next/next/no-img-element -- see wordmark.tsx */}
+          <img
+            src="/brand/cbva-logo@2x.png"
+            alt="CBV & Associates LLP"
+            width={450}
+            height={202}
+            className="h-20 w-auto sm:h-24"
+          />
+          <p className="max-w-prose text-sm text-ink-muted">
+            Seat and meeting room booking for Floor 4, Mumbai — and the
+            occupancy analytics behind it. Pick a person from the role
+            switcher, top right, to sign in.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <section>
         <p className="text-xs tracking-wide text-ink-subtle uppercase">
           {dateFormatter.format(now)}
         </p>
-        <h1 className="mt-1 text-3xl text-ink">
-          {user ? `Good day, ${user.displayName.split(" ")[0]}.` : "Workspace"}
-        </h1>
+        <h1 className="mt-1 text-3xl text-ink">Good day, {user.displayName.split(" ")[0]}.</h1>
         <p className="mt-2 max-w-prose text-sm text-ink-muted">
-          {user ? (
-            <>
-              You are signed in as{" "}
-              <strong className="font-medium text-ink">
-                {GRADE_LABEL[user.grade]}
-              </strong>
-              {user.team ? `, ${user.team}` : null}.{" "}
-              {user.seatMode === "fixed"
-                ? "You have an allocated seat, so you do not need to book."
-                : "You book a seat for each day you come in."}
-            </>
-          ) : (
-            "No one is signed in. Pick a person from the role switcher."
-          )}
+          You are signed in as{" "}
+          <strong className="font-medium text-ink">{GRADE_LABEL[user.grade]}</strong>
+          {user.team ? `, ${user.team}` : null}.{" "}
+          {user.seatMode === "fixed"
+            ? "You have an allocated seat, so you do not need to book."
+            : "You book a seat for each day you come in."}
         </p>
       </section>
 
@@ -112,36 +148,23 @@ export default async function HomePage() {
         </dl>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-3" aria-labelledby="phase-heading">
-        <h2 id="phase-heading" className="sr-only">
-          Build Status
+      <section className="grid gap-6 lg:grid-cols-3" aria-labelledby="go-heading">
+        <h2 id="go-heading" className="sr-only">
+          Where to go
         </h2>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>What Is Built</CardTitle>
-          </CardHeader>
-          <CardBody className="space-y-3 text-sm text-ink-muted">
-            <p className="max-w-prose">
-              Phase 1 is the foundation: schema, database-enforced booking
-              constraints, the clock service, the integration adapters, and a
-              seeded floor of {Number(inventory?.total ?? 0)} desks with eight
-              weeks of booking history behind it.
-            </p>
-            <ul className="space-y-1.5">
-              <PhaseRow phase="1" label="Foundation" state="done" />
-              <PhaseRow phase="2" label="CAD Pipeline & 2D Floor Plan" state="next" />
-              <PhaseRow phase="3" label="Booking Engine, Rooms, Auto-Release" state="todo" />
-              <PhaseRow phase="4" label="3D Floor Plan" state="todo" />
-              <PhaseRow phase="5" label="Admin Analytics & Deploy" state="todo" />
-            </ul>
-            <div className="pt-2">
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/styleguide">Open the Style Guide</Link>
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:col-span-2">
+          {NAV_CARDS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="block rounded-md border border-hairline bg-surface p-4 transition-colors hover:border-navy focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy"
+            >
+              <p className="text-sm font-medium text-ink">{item.label}</p>
+              <p className="mt-1 text-xs text-ink-muted">{item.description}</p>
+            </Link>
+          ))}
+        </div>
 
         <Card>
           <CardHeader>
@@ -155,8 +178,12 @@ export default async function HomePage() {
               <InventoryRow label="Blocked" value={Number(inventory?.blocked ?? 0)} />
             </dl>
             <p className="mt-4 border-t border-hairline pt-3 text-xs text-ink-subtle">
-              Seat positions are on a temporary grid. Phase 2 replaces them with
-              coordinates extracted from the CAD drawing.
+              130 of 141 desks are positioned directly from the architect&rsquo;s
+              drawing; 11 are interpolated and flagged in{" "}
+              <Link href="/admin/floor-plan" className="underline">
+                the floor plan editor
+              </Link>
+              .
             </p>
           </CardBody>
         </Card>
@@ -201,27 +228,5 @@ function InventoryRow({ label, value }: { label: string; value: number }) {
       <dt className="text-ink-muted">{label}</dt>
       <dd className="tabular font-medium text-ink">{value}</dd>
     </div>
-  );
-}
-
-function PhaseRow({
-  phase,
-  label,
-  state,
-}: {
-  phase: string;
-  label: string;
-  state: "done" | "next" | "todo";
-}) {
-  return (
-    <li className="flex items-center gap-3">
-      <span className="seat-code w-4 text-xs text-ink-subtle">{phase}</span>
-      <span className={state === "todo" ? "text-ink-subtle" : "text-ink"}>{label}</span>
-      {state === "done" ? (
-        <Badge variant="positive">Complete</Badge>
-      ) : state === "next" ? (
-        <Badge variant="navy">Next</Badge>
-      ) : null}
-    </li>
   );
 }

@@ -56,13 +56,22 @@ describe("recurring bookings", { timeout: 180_000 }, () => {
 
     const settings = await getSettings(db);
     const holidays = await db.select({ d: schema.holidays.holidayDate }).from(schema.holidays);
-    windowDates = bookableDates({
+    const allWindowDates = bookableDates({
       now: clock.now(),
       workingDays: settings.bookingWindowWorkingDays,
       calendarBound: settings.bookingWindowDays,
       holidays: new Set(holidays.map((h) => h.d)),
       timezone: settings.timezone,
     });
+    // Drop TODAY. bookableDates() offers it regardless of the hour — booking
+    // late is allowed — but createBooking() still refuses a slot that has
+    // already finished (A21), and this suite runs at whatever real hour CI
+    // happens to reach it. Every day past today is, by construction, a slot
+    // that has not started yet, so dropping just today is enough: the same
+    // real-wall-clock fix PHASE-7-HANDOFF applied to the sibling "detaches an
+    // edited occurrence" test, applied here to the window construction rather
+    // than to a single edit target.
+    windowDates = allWindowDates.slice(1);
   });
 
   afterAll(async () => {

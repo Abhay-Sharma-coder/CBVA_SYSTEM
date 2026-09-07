@@ -59,7 +59,11 @@ export const SEAT_STATUS_TOKENS: Record<SeatVisualStatus, SeatStatusToken> = {
     label: "Your Booking",
     description: "You hold this seat. The gold rule marks it as yours.",
     // The one place gold is load-bearing: a 2px rule, on at most one seat.
-    className: "bg-navy-tint-strong border-2 border-gold text-navy",
+    // The fill is `navy-yours`, not `navy-tint-strong` (Phase 8 / B1): at
+    // 14% navy the chip measured 1.29:1 against the drawing as a graphical
+    // object, under WCAG 1.4.11's 3:1. 95% clears it with margin (3.29:1) —
+    // dark enough that the glyph and code need paper text now, not navy.
+    className: "bg-navy-yours border-2 border-gold text-paper",
     glyph: "●",
     srLabel: "Your booking",
     interactive: true,

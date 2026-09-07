@@ -7,6 +7,7 @@ import { SEAT_STATUS_TOKENS } from "@/components/seat/seat-status";
 import type { FloorPlanSeat } from "@/components/floor-plan/types";
 import type { LodLevel } from "@/lib/floor-plan-lod";
 import { PLAN_BOUNDS } from "@/lib/floorplan";
+import { countsAsOccupied } from "@/lib/seat-visual-status";
 import { cn } from "@/lib/utils";
 
 /**
@@ -134,13 +135,24 @@ function SeatMarkerImpl({
       }
     >
       {aggregate ? (
-        // A plain dot: enough to show a desk is there, not enough to pretend
-        // its status is legible at this framing.
+        // A plain dot, not the seven-status vocabulary — that IS illegible at
+        // this framing. But whether the desk is currently held is a coarse,
+        // two-state fact that survives the zoom out just fine: a filled dot
+        // for booked/checked-in/yours, a hollow one for everything else. This
+        // is the density signal that has to survive "occupancy labels off"
+        // (A1's hard constraint) — the same two seat tokens a chip uses,
+        // applied per desk instead of averaged per bay, so it needs no new
+        // colour and no opacity ramp (ADR-048 is explicit that a ramp does
+        // not belong on this layer).
         <span
           aria-hidden="true"
           className={cn(
             "rounded-full",
-            isFocused ? "bg-navy" : "bg-ink-subtle",
+            isFocused
+              ? "bg-navy"
+              : countsAsOccupied(seat.status)
+                ? "bg-navy"
+                : "border border-ink-subtle bg-transparent",
           )}
           style={{ width: unit * 0.34, height: unit * 0.34 }}
         />

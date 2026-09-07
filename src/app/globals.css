@@ -26,6 +26,22 @@
   /* ---- derived neutrals, all mixed from the five above ---- */
   --cbva-navy-tint: color-mix(in srgb, var(--cbva-navy) 8%, var(--cbva-paper));
   --cbva-navy-tint-strong: color-mix(in srgb, var(--cbva-navy) 14%, var(--cbva-paper));
+  /* your_booking's fill ONLY (Phase 8 / B1) — deliberately its own token, not
+     a redefinition of navy-tint-strong above, which also colours ::selection
+     (line ~232) and would turn ordinary text-selection dark-on-dark if pushed
+     this far. Measured directly against the baked plan texture at all 141
+     seats, composited at the 55% opacity the plan actually renders
+     (tests/unit/texture-contrast.test.ts's own method): navy-tint-strong's
+     14% mix read 1.29:1 as a graphical object, under WCAG 1.4.11's 3:1. The
+     relationship is NOT linear — 30–50% measured WORSE (1.03–1.17:1) than 14%
+     before climbing, because at those greys the fill's luminance passes
+     through whatever the drawing's own midtones happen to be at some desk on
+     the floor. 95% is the value that clears 3:1 with real margin (3.29:1,
+     worst case D8-04) while staying visibly one step short of full navy —
+     100% measures 3.77:1, matching --seat-checkedin-fill's own baseline
+     (3.83), which would make "your unconfirmed booking" and "checked in"
+     read as the same weight of navy with only the border differing. */
+  --cbva-navy-yours: color-mix(in srgb, var(--cbva-navy) 95%, var(--cbva-paper));
   --cbva-ink-muted: color-mix(in srgb, var(--cbva-ink) 72%, var(--cbva-paper));
   /* 62% puts tertiary text at 4.90:1 on paper. It was 58% and measured
      4.30:1 — under AA, despite the comment here claiming otherwise. An axe
@@ -57,7 +73,7 @@
   --seat-available-line: var(--cbva-navy);
   --seat-booked-fill: var(--cbva-navy-tint);
   --seat-booked-line: var(--cbva-navy);
-  --seat-yours-fill: var(--cbva-navy-tint-strong);
+  --seat-yours-fill: var(--cbva-navy-yours);
   --seat-yours-line: var(--cbva-gold);
   --seat-fixed-fill: var(--cbva-surface-sunken);
   --seat-fixed-line: var(--cbva-ink-subtle);
@@ -121,6 +137,7 @@
 
   --color-navy-tint: var(--cbva-navy-tint);
   --color-navy-tint-strong: var(--cbva-navy-tint-strong);
+  --color-navy-yours: var(--cbva-navy-yours);
   --color-ink-muted: var(--cbva-ink-muted);
   --color-ink-subtle: var(--cbva-ink-subtle);
   --color-surface: var(--cbva-surface);

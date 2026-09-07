@@ -240,7 +240,47 @@ Things that are fine for a demo and should not go live untouched.
 
 ---
 
-## 9 · The deployment as it stands
+## 9 · The guard pattern, and why this is the third time
+
+`prod:check` now has a third kind of check, added in Phase 8 after Phase 7
+pointed the e2e suite at the deployed database by accident and it
+auto-released 65 of 95 bookable desks. Every count `prod:check` asked at the
+time — users, seats, bookings, rooms — stayed healthy throughout, and it
+reported "looks presentable" while the floor was two-thirds emptied. The gap
+was named at the time (`PHASE-7-HANDOFF.md`: *"`prod:check` catches missing
+data, not wrong-shaped data"*) and left open. It is closed now: `prod:check`
+compares today's `auto_released` count against bookable capacity and fails
+past 40%, calibrated against the real seeded database rather than guessed —
+see `scripts/prod-check.mjs`. Demonstrated failing against a throwaway
+database seeded and then damaged the same way the incident actually damaged
+production: **62 of 93 (67%)**, one point off the real incident's 68%, exit 1,
+named.
+
+**This is the third guard in this project that existed only after the failure
+it was meant to catch, not before it:**
+
+| guard | what it missed | what closed it |
+|---|---|---|
+| `build:floorplan` reproducibility | compared two *builds* to each other, which always agree — a rebuild silently reverted Phase 5's hand-corrected desk positions for a whole phase | `git diff --exit-code` against the **repository**, not a second build |
+| `prod:check`, emptiness | selected the bookings count, printed it, asserted nothing — reported "looks presentable" against 3 bookings after the Phase 6 outage | a real floor (`MIN_BOOKINGS`), migration drift checked first, demonstrated failing three ways |
+| `prod:check`, distribution | every count stayed healthy while 65 of 95 desks were auto-released — the exact case above | the guard this section documents |
+
+The pattern underneath all three is the same: **a count is blind to shape.**
+141 seats is 141 seats whether they are in the right places or all stacked at
+the origin; 5,800 bookings is 5,800 bookings whether they are spread evenly
+or two-thirds auto-released on one day. Every guard added to this project so
+far checked a count because a count is what was easy to assert — and every
+one of them needed a second pass, later, that asked what the data actually
+*looked like*, once a real incident showed a count could stay green through
+real damage. The lesson generalises past this specific guard: **any measure
+this product reports whose *distribution* matters — not just whether it
+exists — needs a band, not a presence check, and the band has to be watched
+failing before it is trusted.** A guard nobody has watched fail is not a
+guard; it is a place a bug can hide behind a green checkmark.
+
+---
+
+## 10 · The deployment as it stands
 
 | | |
 |---|---|
@@ -332,7 +372,7 @@ the runbook is load-bearing and `prod:check` is what enforces it.
 
 ---
 
-## 10 · What does NOT change
+## 11 · What does NOT change
 
 Worth saying explicitly, because it is most of the product:
 

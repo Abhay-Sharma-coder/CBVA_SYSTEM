@@ -14,7 +14,7 @@ import {
   PLAN_BOUNDS,
   floorplanMeta,
   floorplanZones,
-  zoneBounds,
+  zoneSeatBounds,
   type ZoneCode,
 } from "@/lib/floorplan";
 import {
@@ -37,6 +37,12 @@ interface PlanCanvasProps {
   onActivateSeat: (seat: FloorPlanSeat) => void;
   /** Editor hook: dragging is off on /floor and on in /admin/floor-plan. */
   onDragSeat?: (seatCode: string, planX: number, planY: number) => void;
+  /** The bay occupancy chips (A1). Off by default; the per-seat dot fill in
+   *  SeatMarker is the density signal that survives this being off. */
+  showOccupancyLabels?: boolean;
+  /** The room labels over zones A and B (A1). On by default — without them
+   *  those wings read as broken rather than as furnished rooms. */
+  showRoomLabels?: boolean;
   className?: string;
 }
 
@@ -81,6 +87,8 @@ export function PlanCanvas({
   onFocusSeat,
   onActivateSeat,
   onDragSeat,
+  showOccupancyLabels = false,
+  showRoomLabels = true,
   className,
 }: PlanCanvasProps) {
   const { containerRef, size, transform, setTransform, fitTo, zoomAt, handlers } =
@@ -88,9 +96,11 @@ export function PlanCanvas({
   const [animating, setAnimating] = useState(true);
   const seatRefs = useRef(new Map<string, HTMLButtonElement>());
 
+  // Tight to the zone's own seats, not the convex hull (A4). See
+  // zoneSeatBounds' doc comment for the core-overlap arithmetic this avoids.
   const target: Rect = useMemo(
-    () => (activeZone ? zoneBounds(activeZone) : FULL_FLOOR_BOUNDS),
-    [activeZone],
+    () => (activeZone ? zoneSeatBounds(seats, activeZone) : FULL_FLOOR_BOUNDS),
+    [activeZone, seats],
   );
 
   // Zone focus is an animated reframing rather than a jump, so it stays
@@ -216,10 +226,22 @@ export function PlanCanvas({
      changes. Hysteresis, so a settling spring cannot make it flicker. */
   const [lod, setLod] = useState<LodLevel>("bay");
   useEffect(() => {
+    // A4: an explicit zone pick is "show me this wing's desks", a distinct
+    // signal from the ambient pan/zoom the hysteresis exists to damp — so it
+    // forces seat detail outright rather than trusting the fit scale to land
+    // on the right side of the threshold. zoneSeatBounds already clears the
+    // threshold with margin at every viewport ≥ ~490px; below that a wing's
+    // own physical extent cannot fit at per-seat scale regardless of framing,
+    // and forcing the LOD here is the honest fallback rather than pretending
+    // it fits. Whole-floor framing and free zoom are untouched.
+    if (activeZone) {
+      setLod("seat");
+      return;
+    }
     setLod((prev) =>
       resolveLod(prev, transform.scale, LOD_2D_ENTER_BAY, LOD_2D_EXIT_BAY),
     );
-  }, [transform.scale]);
+  }, [transform.scale, activeZone]);
 
   return (
     <div
@@ -303,32 +325,34 @@ export function PlanCanvas({
             The bay code is JetBrains Mono because that is what the type rules
             reserve it for — seat codes, bay labels, plan annotations.
           */}
-          {PLAN_LABELS.map((label) => (
-            <g key={label.code} className="fill-ink" style={HALO}>
-              <text
-                x={label.planX}
-                y={label.planY - 5}
-                textAnchor="middle"
-                className="font-mono"
-                style={{ fontSize: 11, letterSpacing: "0.04em" }}
-              >
-                {label.code}
-              </text>
-              <text
-                x={label.planX}
-                y={label.planY + 9}
-                textAnchor="middle"
-                style={{ fontSize: 12 }}
-              >
-                {labelText(label)}
-              </text>
-            </g>
-          ))}
+          {showRoomLabels
+            ? PLAN_LABELS.map((label) => (
+                <g key={label.code} className="fill-ink" style={HALO}>
+                  <text
+                    x={label.planX}
+                    y={label.planY - 5}
+                    textAnchor="middle"
+                    className="font-mono"
+                    style={{ fontSize: 11, letterSpacing: "0.04em" }}
+                  >
+                    {label.code}
+                  </text>
+                  <text
+                    x={label.planX}
+                    y={label.planY + 9}
+                    textAnchor="middle"
+                    style={{ fontSize: 12 }}
+                  >
+                    {labelText(label)}
+                  </text>
+                </g>
+              ))
+            : null}
 
           <BayDensity
             seats={seats}
             activeZone={activeZone}
-            visible={lod === "bay"}
+            visible={lod === "bay" && showOccupancyLabels}
             reduceMotion={reduceMotion}
             scale={transform.scale}
           />

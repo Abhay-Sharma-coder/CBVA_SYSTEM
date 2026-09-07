@@ -30,6 +30,9 @@ export interface FloorPlanProps {
   onActivateSeat?: (seat: FloorPlanSeat) => void;
   /** Supplied only by the admin editor; absent means seats cannot be moved. */
   onDragSeat?: (seatCode: string, planX: number, planY: number) => void;
+  /** A1: the two independent label toggles, shared by both renderings. */
+  showOccupancyLabels?: boolean;
+  showRoomLabels?: boolean;
   className?: string;
 }
 
@@ -44,6 +47,8 @@ export function FloorPlan({
   onFocusSeat,
   onActivateSeat,
   onDragSeat,
+  showOccupancyLabels = false,
+  showRoomLabels = true,
   className,
 }: FloorPlanProps) {
   // Read once, here, and thread it down. Every animation in the subtree is
@@ -75,6 +80,8 @@ export function FloorPlan({
         crossfadeKey={crossfadeKey}
         onFocusSeat={onFocusSeat ?? noop}
         onActivateSeat={onActivateSeat ?? noop}
+        showOccupancyLabels={showOccupancyLabels}
+        showRoomLabels={showRoomLabels}
         className={className}
       />
     );
@@ -90,6 +97,8 @@ export function FloorPlan({
       onFocusSeat={onFocusSeat ?? noop}
       onActivateSeat={onActivateSeat ?? noop}
       onDragSeat={onDragSeat}
+      showOccupancyLabels={showOccupancyLabels}
+      showRoomLabels={showRoomLabels}
       className={className}
     />
   );

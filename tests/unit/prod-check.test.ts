@@ -33,6 +33,12 @@ const healthy = {
   series: 4,
   clock_offset: 0,
   queued_mail: 2,
+  // Measured against the real seeded database (Phase 8 / B2): a single day's
+  // auto_released count normally runs 19–27% of bookable capacity in the
+  // worst slot; 12 of 93 (~13%) is a representative healthy snapshot.
+  auto_released_today: 12,
+  recent_auto_released: 25,
+  recent_held: 1888,
 };
 
 const fullyMigrated = { applied: ALL_MIGRATIONS, onDisk: ALL_MIGRATIONS };
@@ -133,5 +139,100 @@ describe("failures versus warnings", () => {
       fullyMigrated,
     );
     expect(failures.some((f: string) => /nobody could book/.test(f))).toBe(true);
+  });
+});
+
+/**
+ * THE DISTRIBUTION GUARD (B2) — Phase 7 established that every count above
+ * can stay healthy while the DISTRIBUTION of bookings is wrecked: 65 of 95
+ * bookable desks auto-released, and `prod:check` said "looks presentable"
+ * throughout. These are the shapes that incident actually produced, so this
+ * guard cannot regress back into not seeing them.
+ */
+describe("the distribution guard — auto-released desks", () => {
+  it("passes a healthy day", () => {
+    const { failures, warnings } = evaluateProduction(healthy, fullyMigrated);
+    expect(failures).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("FAILS on the exact shape of the 65/95 incident", () => {
+    const { failures } = evaluateProduction(
+      { ...healthy, bookable: 95, auto_released_today: 65 },
+      fullyMigrated,
+    );
+    expect(failures.some((f: string) => /65 of 95 bookable desks/.test(f))).toBe(true);
+    expect(failures.some((f: string) => /68%/.test(f))).toBe(true);
+  });
+
+  it("passes exactly at the 40% boundary and fails one desk above it", () => {
+    // 40% of 93, rounded down, is 37 — the boundary the guard is written
+    // against is the RATIO, not a rounded desk count, so assert on the ratio
+    // directly rather than fighting integer rounding at the edge.
+    const atBoundary = Math.floor(healthy.bookable * 0.4);
+    const overBoundary = Math.ceil(healthy.bookable * 0.4) + 1;
+    expect(
+      evaluateProduction(
+        { ...healthy, auto_released_today: atBoundary },
+        fullyMigrated,
+      ).failures,
+    ).toEqual([]);
+    expect(
+      evaluateProduction(
+        { ...healthy, auto_released_today: overBoundary },
+        fullyMigrated,
+      ).failures,
+    ).toHaveLength(1);
+  });
+
+  it("does not confuse a normal single-slot spike with the incident", () => {
+    // Measured against the real seed: a single slot's worst observed ratio
+    // is 19/57 (33%). This must stay a pass, or the guard fires on ordinary
+    // demo data and nobody trusts it by the second run.
+    const { failures } = evaluateProduction(
+      { ...healthy, bookable: 93, auto_released_today: 19 },
+      fullyMigrated,
+    );
+    expect(failures).toEqual([]);
+  });
+
+  it("WARNS, not fails, when auto-release looks like it has stopped entirely", () => {
+    // A16/A26 territory: worth a look, not worth blocking a 9am deploy over —
+    // a healthy morning can legitimately show zero before any grace window
+    // has expired yet.
+    const { failures, warnings } = evaluateProduction(
+      { ...healthy, auto_released_today: 0, recent_auto_released: 0, recent_held: 1888 },
+      fullyMigrated,
+    );
+    expect(failures).toEqual([]);
+    expect(warnings.some((w: string) => /zero auto_released/.test(w))).toBe(true);
+  });
+
+  it("does not warn when the recent population is too small to mean anything", () => {
+    const { warnings } = evaluateProduction(
+      { ...healthy, auto_released_today: 0, recent_auto_released: 0, recent_held: 40 },
+      fullyMigrated,
+    );
+    expect(warnings.some((w: string) => /zero auto_released/.test(w))).toBe(false);
+  });
+
+  it("stays silent on older count shapes that predate this guard", () => {
+    // A scratch database or an older checkout's query might not carry the
+    // new columns at all. Undefined must not throw and must not fail.
+    const { failures } = evaluateProduction(
+      {
+        users: 141,
+        seats: 141,
+        bookable: 93,
+        bookings: 5804,
+        meeting_rooms: 5,
+        live_releases: 3,
+        series: 4,
+        clock_offset: 0,
+        queued_mail: 2,
+      },
+      fullyMigrated,
+    );
+    expect(failures).toEqual([]);
   });
 });

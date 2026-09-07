@@ -145,7 +145,9 @@ function mix(a: Rgb, b: Rgb, p: number): Rgb {
 
 const HAIRLINE: Rgb = [0xe4, 0xe0, 0xd9];
 const NAVY_TINT = mix(NAVY, PAPER, 0.08);
-const NAVY_TINT_STRONG = mix(NAVY, PAPER, 0.14);
+/** --cbva-navy-yours (Phase 8 / B1) — the your_booking fill, and ONLY that;
+ *  navy-tint-strong (14%) still exists, unchanged, for ::selection. */
+const NAVY_YOURS = mix(NAVY, PAPER, 0.95);
 const SURFACE_SUNKEN = mix(HAIRLINE, PAPER, 0.32);
 const INK_SUBTLE = mix(INK, PAPER, 0.62);
 
@@ -162,7 +164,7 @@ const INK_SUBTLE = mix(INK, PAPER, 0.62);
 const STATUS_PAINT: Array<{ status: string; fill: Rgb; line: Rgb }> = [
   { status: "available", fill: PAPER, line: NAVY },
   { status: "booked", fill: NAVY_TINT, line: NAVY },
-  { status: "your_booking", fill: NAVY_TINT_STRONG, line: GOLD },
+  { status: "your_booking", fill: NAVY_YOURS, line: GOLD },
   { status: "reserved_fixed", fill: SURFACE_SUNKEN, line: INK_SUBTLE },
   { status: "checked_in", fill: NAVY, line: NAVY },
   { status: "auto_released", fill: PAPER, line: CAUTION },
@@ -198,11 +200,25 @@ describe("seat chips against the baked drawing", () => {
    * measurably worse than Phase 6 shipped. An absolute 3:1 gate on all seven
    * would fail this build for something it did not cause, and "fix the chip"
    * would mean redesigning three status tokens on the last day of the project.
+   *
+   * PHASE 8 / B1 moved `your_booking`'s baseline on purpose, from 1.29 to
+   * 3.29 — `--seat-yours-fill` was darkened until the chip clears 3:1 as a
+   * graphical object (WCAG 1.4.11), keeping the gold rule as the hue and
+   * measuring against this exact baked texture rather than guessing a value.
+   * `reserved_fixed` and `auto_released` were verified the same way — their
+   * redundant indicator (the border, independent of the fill) measures only
+   * 1.41:1 and 1.48:1 in isolation, and the combined figure below (whichever
+   * of fill or line is stronger, per pixel) is what reaches 2.15 / 2.27,
+   * still under 3:1. Both are unchanged from Phase 6: reaching 3:1 on either
+   * would need the same drastic a re-tint `your_booking` needed — B1 asked
+   * for `your_booking` specifically, not a redesign of two more tokens on the
+   * last phase of the project, so their baselines are carried forward as the
+   * known, reported gap they already were.
    */
   const PHASE_6_BASELINE: Record<string, number> = {
     available: 3.83,
     booked: 3.83,
-    your_booking: 1.29,
+    your_booking: 3.29,
     reserved_fixed: 2.15,
     checked_in: 3.83,
     auto_released: 2.27,

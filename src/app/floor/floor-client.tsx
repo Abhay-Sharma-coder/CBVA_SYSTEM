@@ -30,6 +30,7 @@ import type {
   SlotDefinition,
 } from "@/components/floor-plan/types";
 import { Card, CardBody } from "@/components/ui/primitives";
+import { Switch } from "@/components/ui/switch";
 import { useUiStore } from "@/lib/store/ui";
 
 interface DatesPayload {
@@ -63,6 +64,10 @@ export function FloorClient() {
     setMode,
     selectedSeatCode,
     setSelectedSeatCode,
+    showOccupancyLabels,
+    setShowOccupancyLabels,
+    showRoomLabels,
+    setShowRoomLabels,
   } = useUiStore();
 
   const [intent, setIntent] = useState<FloorPlanSeat | null>(null);
@@ -314,6 +319,32 @@ export function FloorClient() {
             <ZoneFilter active={activeZone} onChange={onChangeZone} />
             <Legend counts={counts} />
           </div>
+          {/* Two independent toggles (Phase 8 / A1) — not one "labels" switch,
+              because they answer different questions. Occupancy labels are the
+              Phase 7 density read at whole-floor zoom, off by default: the
+              plan starts quieter and the seat markers' own fill still shows a
+              busy wing from an empty one. Room labels are Phase 6 wayfinding
+              for the two wings with no bookable desks at all, on by default —
+              without them those wings read as broken rather than furnished.
+              List view has neither layer, so the row is plan/3D only. */}
+          {view === "plan" ? (
+            <div className="flex flex-wrap items-center gap-6 border-t border-hairline pt-3">
+              <Switch
+                id="show-occupancy-labels"
+                label="Occupancy labels"
+                description="Bay counts, e.g. “A1 0/2”, at whole-floor zoom."
+                checked={showOccupancyLabels}
+                onCheckedChange={setShowOccupancyLabels}
+              />
+              <Switch
+                id="show-room-labels"
+                label="Room labels"
+                description="Names the boardroom and meeting rooms on the plan."
+                checked={showRoomLabels}
+                onCheckedChange={setShowRoomLabels}
+              />
+            </div>
+          ) : null}
         </CardBody>
       </Card>
 
@@ -354,6 +385,8 @@ export function FloorClient() {
               crossfadeKey={`${activeDate}-${activeSlot}`}
               onFocusSeat={setFocusedSeatCode}
               onActivateSeat={onActivateSeat}
+              showOccupancyLabels={showOccupancyLabels}
+              showRoomLabels={showRoomLabels}
               className={view === "plan" ? "h-[clamp(26rem,70vh,50rem)] w-full" : undefined}
             />
           </motion.div>

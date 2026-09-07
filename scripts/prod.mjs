@@ -130,7 +130,16 @@ if (verb === "check") {
       (select count(*)::int from seat_releases where revoked_at is null) as live_releases,
       (select count(*)::int from booking_series where status = 'active') as series,
       (select demo_offset_seconds from settings)                         as clock_offset,
-      (select count(*)::int from notification_log where status = 'queued') as queued_mail`);
+      (select count(*)::int from notification_log where status = 'queued') as queued_mail,
+      (select count(distinct seat_id)::int from bookings
+         where status = 'auto_released' and booking_date = current_date)  as auto_released_today,
+      (select count(*)::int from bookings
+         where booking_date between (current_date - 14) and current_date
+           and status = 'auto_released')                                 as recent_auto_released,
+      (select count(*)::int from bookings
+         where booking_date between (current_date - 14) and current_date
+           and status in ('confirmed','checked_in','completed',
+                           'auto_released','completed_no_show'))          as recent_held`);
 
   /*
    * Which migrations production has actually had applied.

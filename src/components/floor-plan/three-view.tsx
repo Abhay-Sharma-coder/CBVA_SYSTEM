@@ -45,6 +45,8 @@ export interface ThreeViewProps {
   crossfadeKey: string;
   onFocusSeat: (code: string | null) => void;
   onActivateSeat: (seat: FloorPlanSeat) => void;
+  showOccupancyLabels?: boolean;
+  showRoomLabels?: boolean;
   className?: string;
 }
 
@@ -58,6 +60,8 @@ export function ThreeView(props: ThreeViewProps) {
     crossfadeKey,
     onFocusSeat,
     onActivateSeat,
+    showOccupancyLabels = false,
+    showRoomLabels = true,
     className,
   } = props;
 
@@ -87,6 +91,8 @@ export function ThreeView(props: ThreeViewProps) {
         crossfadeKey={crossfadeKey}
         onFocusSeat={onFocusSeat}
         onActivateSeat={onActivateSeat}
+        showOccupancyLabels={showOccupancyLabels}
+        showRoomLabels={showRoomLabels}
         className={className}
       />
     );
@@ -134,6 +140,8 @@ export function ThreeView(props: ThreeViewProps) {
             onActivateSeat={onActivateSeat}
             onContextLost={onContextLost}
             onFailure={onFailure}
+            showOccupancyLabels={showOccupancyLabels}
+            showRoomLabels={showRoomLabels}
             className="h-full w-full"
             ariaLabel={`Three-dimensional view of Floor 4, showing ${seats.length} desks. ${nonBookableSummary()} For keyboard access use the plan or list view.`}
           />
@@ -156,6 +164,8 @@ function FallbackPlan({
   crossfadeKey: string;
   onFocusSeat: (code: string | null) => void;
   onActivateSeat: (seat: FloorPlanSeat) => void;
+  showOccupancyLabels?: boolean;
+  showRoomLabels?: boolean;
   className?: string;
 }) {
   return (

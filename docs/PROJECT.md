@@ -30,10 +30,12 @@ design decision is judged against whether it produces trustworthy occupancy data
 | Article | **Books** | Same. The largest group — 62 of 141. |
 | Admin / HR / IT | Fixed | Book on behalf; manage seat inventory; read analytics. |
 
-Floor 4 today: **141 desks, 141 people, 47 fixed / 94 who must book against 94
-bookable desks** — supply and demand balance exactly, which is itself a finding.
-The Manager/Assistant Manager split that produces those numbers is an assumption
-(ASSUMPTIONS A1).
+Floor 4 today: **141 desks, 141 people, 47 fixed / 94 who must book against 93
+bookable desks** (one of the 141, PD-18, is blocked — out of service) — supply
+and demand are close but not exactly balanced: 94 people against 93 desks is
+one short, not the round number it looks like at a glance. The Manager/
+Assistant Manager split that produces the 94 is an assumption (ASSUMPTIONS A1);
+see `docs/OPEN-QUESTIONS.md` for the full range this could actually be.
 
 ## 3. Core rules
 

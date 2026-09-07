@@ -45,11 +45,21 @@ changes numbers or behaviour · 🟡 cosmetic — safe to leave.
 every occupancy number in the product.
 
 **Why it matters:** this single number sets the denominator for the entire
-analytics product. The floor has 94 bookable desks. We seeded 94 people who must
-book, so demand and supply balance exactly. If the real split is 15/39, demand
-rises to 101 against 94 desks and the floor is structurally short — which is
-precisely the finding the partners are commissioning this tool to produce. We
-cannot answer their question with a number we invented.
+analytics product. The floor has 93 bookable desks — 141 total, minus 47
+allocated to fixed grades, minus 1 blocked (PD-18, A13). We seeded 94 people
+who must book, so demand and supply are close but not exactly balanced: the
+floor is one desk short on our own guessed split. If the real split is 15/39,
+demand rises to 101 against the same 93 desks and the floor is structurally
+short by 8 — which is precisely the finding the partners are commissioning
+this tool to produce. We cannot answer their question with a number we
+invented.
+
+**Corrected in Phase 8**, measured against the running system rather than
+recalled: this entry and `docs/PROJECT.md` had said "94 bookable desks" and
+"balance exactly" since Phase 1, without accounting for the one blocked desk
+A13 introduces. The desk count is 93, not 94, and the seeded floor has never
+actually been in exact balance — corrected here so the wrong one does not
+reach a partner. `docs/OPEN-QUESTIONS.md` §1 carries the corrected table.
 
 **WE NEED AN HR LIST**: name, email, grade, team, and whether they hold an
 allocated seat. Nothing else in Phase 1 is as important as this.
