@@ -218,6 +218,39 @@ the drawing's stated 93 and 4 does not reconcile — 34 of 141 anchors have no
 hatch of any colour near them. The gate said nothing ships if it does not
 reconcile, so nothing did. `PHASE-6-HANDOFF.md` §4 has the measurements.
 
+**Phase 7 — Fidelity, level of detail, and the close ✅**
+The plan texture now carries the drawing's own 29 colour combinations, 8 line
+weights, mixed joins, fills and its **11 embedded photographs** — which a
+vector-only extractor could not see at all, so their absence had been silent for
+five phases. Ported into the existing stdlib parser rather than adopting the
+PyMuPDF reference (ADR-046): no pip step, one parser feeding both the geometry
+and the texture, and the audit's exact constants reproduce in both. One SVG per
+raster width, because a zero-width PDF stroke means one DEVICE pixel and 62% of
+this drawing is zero-width.
+
+**Status LOD**, recommended in Phase 4 and never built (ADR-048). Past a
+threshold both views stop drawing per-seat status — unreadable at that distance
+in principle — and answer the density question per bay instead. The threshold
+falls out of the marker size rather than being chosen. Draw calls went **down**,
+16 → 13, because one merged plate mesh replaces up to six glyph meshes.
+
+Three guards that had never been watched failing now have been: the CAD audit
+(two ways), `prod:check` (three ways against a damaged throwaway database), and
+the texture-contrast regression gate, which compares against the Phase 6 texture
+and so distinguishes a regression from a figure that was already there.
+
+Zones C and D stopped carrying invented names. A `manual` seat anchor now
+survives `npm run build:floorplan`, which it did not — so the one route to
+closing A24 was being undone by an ordinary rebuild.
+
+**And one incident, caused and documented.** `next start` reads
+`.env.production.local`, so Phase 6's own recommended way to run the e2e suite
+against a production build points it at the **deployed database** — and passes
+while doing it. Production came back with 65 of 95 desks auto-released. Repaired
+with `prod:seed`, closed by `npm run start:local`. `PHASE-7-HANDOFF.md` §7.
+
+240 tests, up from 215.
+
 ## 9. Open questions
 
 See `ASSUMPTIONS.md`. The five that block real use:

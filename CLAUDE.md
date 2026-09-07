@@ -20,6 +20,10 @@ desks against headcount. Design every decision with that in mind.
 6. **Visual fidelity to the architect's drawing** ✅ done — the partition layer
    filtered by stroke colour, the real five meeting rooms, static furniture for
    the two seatless wings, room labels
+7. **Full-colour plan texture, status LOD, and the client pack** ✅ done — the
+   drawing's own colours, weights and its 11 embedded bitmaps; bay-level
+   occupancy past a zoom threshold in both views; guards that have been watched
+   failing
 
 ---
 
