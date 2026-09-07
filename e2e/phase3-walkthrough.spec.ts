@@ -233,6 +233,23 @@ test("9 — advancing the clock auto-releases an un-checked-in desk", async ({ p
   await page.goto("/floor");
   await settled(page);
 
+  /*
+   * Pin the clock to a moment when nothing is due YET, rather than trusting
+   * the wall clock to be early enough.
+   *
+   * The two-hour grace window on the 09:00 slot expires at 11:00. Run before
+   * that, the real time is a fine baseline; run after it — which any suite
+   * started late morning is — this first `runJobs` settles every un-checked-in
+   * booking itself, and the advance below then finds nothing left to do and the
+   * test fails having proved the opposite of a defect.
+   *
+   * Half an hour into the slot is inside the grace window by construction, so
+   * both halves of this narrative are now deterministic at any hour.
+   */
+  await advanceClockTo(page, new Date(new Date(slotStartsAt).getTime() + 30 * 60_000));
+  await page.reload();
+  await settled(page);
+
   // Nothing is due yet.
   const before = await runJobs(page);
   expect(before.autoRelease.released).toBeGreaterThanOrEqual(0);

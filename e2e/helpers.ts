@@ -72,10 +72,28 @@ export async function clockNow(page: Page): Promise<Date> {
  * check-in window is measured from that slot's start. So the delta is computed
  * from where the clock actually is.
  */
+/**
+ * Move the demo clock TO a moment, forwards or backwards.
+ *
+ * It used to refuse to go backwards -- `if (seconds <= 0) return;` -- which
+ * made it silently do NOTHING once the wall clock had passed the target, and
+ * that is far worse than failing. The walkthrough asks for "half an hour into
+ * the 09:00 slot" and then "two and a half hours into it"; run any time after
+ * 11:30 both calls became no-ops, every later assertion was then made against
+ * the real time, and step 9 failed claiming the auto-release job had settled
+ * nothing — when what had actually happened is that its own baseline run, at
+ * the real time and already past the grace window, had settled everything
+ * first. The test reported the opposite of the truth.
+ *
+ * `POST /api/clock` accepts +/- 7 days per call and the offset is CHECKed to
+ * +/- 30 days (A22), so a backwards move is bounded exactly as a forwards one
+ * is. A demo clock that can only ever go forwards is not a clock, it is a
+ * ratchet.
+ */
 export async function advanceClockTo(page: Page, target: Date): Promise<void> {
   const now = await clockNow(page);
-  const seconds = Math.ceil((target.getTime() - now.getTime()) / 1000);
-  if (seconds <= 0) return;
+  const seconds = Math.round((target.getTime() - now.getTime()) / 1000);
+  if (seconds === 0) return;
   await advanceClock(page, seconds);
 }
 
