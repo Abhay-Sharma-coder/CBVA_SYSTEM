@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import {
   AM,
@@ -155,6 +155,21 @@ describe("recurring bookings", { timeout: 180_000 }, () => {
    */
   it("detaches an edited occurrence from its series instead of colliding", async () => {
     const { series } = await makeSeries();
+    /*
+     * The LAST occurrence, not an arbitrary one.
+     *
+     * The series starts on the first bookable date, which is often TODAY, and
+     * `cutoff_minutes` closes edits 60 minutes before a slot starts. So an
+     * unordered `.limit(1)` picked today's occurrence whenever the database
+     * felt like it, and the whole test failed after 08:00 with "Changes closed
+     * at 08:00" — correct behaviour from the rule, and nothing to do with what
+     * this test is about, which is that editing an occurrence DETACHES it from
+     * its series.
+     *
+     * Ordering to the furthest date keeps the real clock (deliberate, above:
+     * the materialiser's window has to be the real window) while putting the
+     * edited day safely inside the edit window.
+     */
     const [occurrence] = await db
       .select({
         id: schema.bookings.id,
@@ -163,6 +178,7 @@ describe("recurring bookings", { timeout: 180_000 }, () => {
       })
       .from(schema.bookings)
       .where(eq(schema.bookings.seriesId, series.id))
+      .orderBy(desc(schema.bookings.bookingDate))
       .limit(1);
 
     const moved = await editBooking(

@@ -287,6 +287,13 @@ npm run prod:check                        # again
 
 `docs/RUNBOOK.md` is the operating guide and takes precedence over this section.
 
+**Never run the e2e suite against `npm start`.** `next start` sets
+NODE_ENV=production, so Next loads `.env.production.local` ahead of `.env.local`
+and the suite silently drives the DEPLOYED database — while passing, because the
+app is fine and the data is a copy of the same seed. Use `npm run start:local`,
+which forces `.env.local` and refuses any other host. Full account in the
+runbook.
+
 ### Nothing sequenced migrations against deploys, and that is the general problem
 
 **This is the single most important operational finding in the project**, and it

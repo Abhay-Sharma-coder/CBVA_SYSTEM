@@ -40,6 +40,31 @@ interface PlanCanvasProps {
   className?: string;
 }
 
+/**
+ * A paper halo behind each plan label, and ink rather than ink-subtle.
+ *
+ * These labels are <text> lying DIRECTLY on the architect's drawing with
+ * nothing behind them. That was fine while the drawing was baked as pale
+ * greyscale. Phase 7 bakes it in its own colours, and measuring the composited
+ * pixels found ink-subtle reaching only 4.02:1 against the drawing's darker
+ * linework -- below the 4.5:1 floor, and varying with whatever the label
+ * happens to sit over, which is the worse property.
+ *
+ * `paint-order: stroke` draws the stroke first and the fill on top, so a
+ * paper-coloured stroke becomes a halo AROUND each glyph rather than a smear
+ * across it. The effective background is then paper wherever the label lands,
+ * so the ratio no longer depends on the drawing at all.
+ *
+ * The label, not the texture. The drawing is the thing being reproduced
+ * faithfully; a label drawn over it is ours to make legible.
+ */
+const HALO: React.CSSProperties = {
+  paintOrder: "stroke",
+  stroke: "var(--cbva-paper)",
+  strokeWidth: 3,
+  strokeLinejoin: "round",
+};
+
 const DIRECTIONS: Record<string, [number, number]> = {
   ArrowRight: [1, 0],
   ArrowLeft: [-1, 0],
@@ -279,7 +304,7 @@ export function PlanCanvas({
             reserve it for — seat codes, bay labels, plan annotations.
           */}
           {PLAN_LABELS.map((label) => (
-            <g key={label.code} className="fill-ink-subtle">
+            <g key={label.code} className="fill-ink" style={HALO}>
               <text
                 x={label.planX}
                 y={label.planY - 5}

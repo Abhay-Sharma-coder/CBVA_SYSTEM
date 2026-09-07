@@ -112,12 +112,17 @@ export function ThreeView(props: ThreeViewProps) {
           the e2e suite included — can tell which desk the pointer is over, and
           the only way to find one is to click blindly around the canvas.
         */}
+        {/*
+          The role and the label go DOWN to the canvas rather than being applied
+          here, because this element also contains the scene controls. An
+          element announced as an image that contains focusable buttons is
+          axe's `nested-interactive`, serious — see the note in scene.tsx.
+          The data attributes stay: they are not ARIA, and the suite reads them.
+        */}
         <div
           className="h-full w-full"
-          role="img"
           data-focused-seat={focusedSeatCode ?? ""}
           data-selected-seat={selectedSeatCode ?? ""}
-          aria-label={`Three-dimensional view of Floor 4, showing ${seats.length} desks. ${nonBookableSummary()} For keyboard access use the plan or list view.`}
         >
           <Scene3D
             seats={seats}
@@ -130,6 +135,7 @@ export function ThreeView(props: ThreeViewProps) {
             onContextLost={onContextLost}
             onFailure={onFailure}
             className="h-full w-full"
+            ariaLabel={`Three-dimensional view of Floor 4, showing ${seats.length} desks. ${nonBookableSummary()} For keyboard access use the plan or list view.`}
           />
         </div>
       </div>

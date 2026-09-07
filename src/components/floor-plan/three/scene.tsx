@@ -51,6 +51,8 @@ export interface Scene3DProps {
   onContextLost: () => void;
   onFailure: () => void;
   className?: string;
+  /** Announced on the canvas itself, never on a wrapper holding controls. */
+  ariaLabel: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export default function Scene3D(props: Scene3DProps) {
     onContextLost,
     onFailure,
     className,
+    ariaLabel,
   } = props;
 
   const [palette, setPalette] = useState<SeatPalette | null>(null);
@@ -137,6 +140,23 @@ export default function Scene3D(props: Scene3DProps) {
 
   return (
     <div className={className} data-floor-3d="ready">
+      {/*
+        role="img" belongs on the CANVAS, not on a container that also holds
+        the scene controls.
+
+        ADR-032's position is that the 3D view is a picture and not the
+        accessible path, which is right — but the role was on an outer wrapper
+        that also contained the "Top down" and "Refit" buttons. An element
+        announced as an image containing focusable controls is axe's
+        `nested-interactive`, serious: a screen reader presents the subtree as
+        one image, so the two buttons inside it are announced as part of a
+        picture or not at all.
+
+        This surface had never been audited. It was added to the axe sweep in
+        Phase 7 and failed on the first run, which is the entire argument for
+        auditing surfaces you believe are fine.
+      */}
+      <div role="img" aria-label={ariaLabel} className="h-full w-full">
       <Canvas
         // `touch-action: none` belongs on the canvas alone. Put it on the
         // container and a phone can no longer scroll the page past the plan.
@@ -332,6 +352,7 @@ export default function Scene3D(props: Scene3DProps) {
           onViewSettled={setView}
         />
       </Canvas>
+      </div>
 
       <SceneControls
         activeZone={activeZone}

@@ -221,41 +221,53 @@ test("zooming in switches to per-seat status, and back out again", async ({ page
   await expect(canvas).toHaveAttribute("data-lod", "bay");
 });
 
-test("the bay chips report bookable occupancy, agreeing with the legend", async ({
-  page,
-}) => {
+test("the bay chips agree with the seats they aggregate", async ({ page }) => {
   await openFloor(page);
   const canvas = page.locator("[role='application']");
   await expect(canvas).toHaveAttribute("data-lod", "bay");
 
-  // Sum the chips and compare with the occupancy readout above the plan. The
-  // failure this catches is the Phase 5 heat-map defect: counting occupied
-  // desks without dividing by each bay's own capacity, which draws a picture
-  // of which bays are biggest rather than which are busy.
-  const totals = await canvas.evaluate((host) => {
-    let occupied = 0;
-    let capacity = 0;
-    for (const g of host.querySelectorAll("svg g > g")) {
-      const texts = g.querySelectorAll("text");
-      const value = texts[1]?.textContent ?? "";
-      const match = /^(\d+)\/(\d+)$/.exec(value.trim());
-      if (match) {
-        occupied += Number(match[1]);
-        capacity += Number(match[2]);
-      }
+  // Compared against the SEAT ELEMENTS rather than the headline readout, so
+  // this asserts the aggregation itself and not a piece of text formatting.
+  //
+  // The failure it catches is the Phase 5 bay-heat-map defect: counting
+  // occupied desks without dividing by each bay's own capacity, which
+  // saturates every cell to the bay's size and draws a picture of which bays
+  // are biggest rather than which are busy.
+  const truth = await page.evaluate(() => {
+    const OCCUPIED = ["booked", "checked_in", "your_booking"];
+    const NO_CAPACITY = ["blocked", "reserved_fixed"];
+    const perBay = new Map<string, { occupied: number; capacity: number }>();
+    for (const el of document.querySelectorAll("[data-seat]")) {
+      const bay = el.getAttribute("data-bay") ?? "";
+      const status = el.getAttribute("data-status") ?? "";
+      const row = perBay.get(bay) ?? { occupied: 0, capacity: 0 };
+      if (!NO_CAPACITY.includes(status)) row.capacity += 1;
+      if (OCCUPIED.includes(status)) row.occupied += 1;
+      perBay.set(bay, row);
     }
-    return { occupied, capacity };
+    return [...perBay.entries()]
+      .filter(([, v]) => v.capacity > 0)
+      .map(([bay, v]) => `${bay}:${v.occupied}/${v.capacity}`)
+      .sort();
   });
 
-  const readout = await page.locator("text=/^\d+\/\d+$/").first().textContent();
-  const [, headlineOccupied, headlineCapacity] =
-    /^(\d+)\/(\d+)$/.exec((readout ?? "").trim()) ?? [];
+  const drawn = await canvas.evaluate((host) =>
+    [...host.querySelectorAll("svg g > g")]
+      .map((g) => {
+        const texts = g.querySelectorAll("text");
+        const bay = texts[0]?.textContent?.trim();
+        const count = texts[1]?.textContent?.trim();
+        return bay && count ? `${bay}:${count}` : null;
+      })
+      .filter((v): v is string => v !== null)
+      .sort(),
+  );
 
-  // Chips cover only bays with bookable supply, so they can total at most the
-  // headline. Anything OVER it means a bay is being double counted.
-  expect(totals.capacity).toBeLessThanOrEqual(Number(headlineCapacity));
-  expect(totals.occupied).toBeLessThanOrEqual(Number(headlineOccupied));
-  expect(totals.capacity).toBeGreaterThan(0);
+  expect(drawn.length).toBeGreaterThanOrEqual(10);
+  // Every chip drawn must match its bay exactly, and every bay with bookable
+  // supply must have a chip. Set equality, so neither a missing chip nor an
+  // invented one passes.
+  expect(drawn).toEqual(truth);
 });
 
 test("the list view carries the same seats and can be filtered", async ({ page }) => {

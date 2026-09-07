@@ -24,7 +24,8 @@
     "prod:migrate": "node scripts/prod.mjs migrate",
     "prod:seed": "node scripts/prod.mjs seed",
     "prod:jobs": "node scripts/prod.mjs jobs",
-    "deploy": "npx vercel deploy --prod"
+    "deploy": "npx vercel deploy --prod",
+    "start:local": "node scripts/start-local.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

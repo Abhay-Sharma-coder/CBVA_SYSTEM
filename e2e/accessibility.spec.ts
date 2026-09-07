@@ -6,6 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
 // It always runs from the project root, so cwd is the reliable anchor.
 const AXE_PATH = nodePath.join(process.cwd(), "node_modules", "axe-core", "axe.min.js");
 
+/** Spelled this way so no escape sequence can be mangled into a real one. */
+const NL = String.fromCharCode(10);
+
 interface AxeNode {
   target: string[];
   failureSummary?: string;
@@ -18,9 +21,32 @@ interface AxeViolation {
 }
 interface AxeResults {
   violations: AxeViolation[];
+  incomplete: AxeViolation[];
 }
 
-async function audit(page: Page): Promise<AxeViolation[]> {
+/**
+ * AXE CANNOT MEASURE CONTRAST AGAINST A RASTER BACKGROUND.
+ *
+ * When it cannot resolve what is behind a piece of text -- an image, a gradient,
+ * anything it cannot reduce to a single computed colour -- `color-contrast`
+ * returns INCOMPLETE rather than a violation. It is not a pass. It is axe
+ * saying "I could not judge this one".
+ *
+ * That matters more here than in most apps, because Phase 7 put the architect's
+ * drawing behind the plan in its own colours, including red workstation hatch
+ * across most of the C and D wings. Every element drawn over the plan is
+ * exactly the case axe declines to judge, so reporting only the violation count
+ * after that change would be a false green of precisely the kind Phase 6 spent
+ * itself finding.
+ *
+ * So the incomplete count is returned and reported alongside, and the elements
+ * axe could not judge are measured directly from a screenshot -- see
+ * `contrast-over-plan.spec.ts`.
+ */
+async function audit(page: Page): Promise<{
+  violations: AxeViolation[];
+  incompleteContrast: AxeViolation[];
+}> {
   await page.addScriptTag({ path: AXE_PATH });
   const results = await page.evaluate(async () => {
     // @ts-expect-error axe is injected into the page above
@@ -28,7 +54,12 @@ async function audit(page: Page): Promise<AxeViolation[]> {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
     })) as AxeResults;
   });
-  return results.violations;
+  return {
+    violations: results.violations,
+    incompleteContrast: (results.incomplete ?? []).filter(
+      (r) => r.id === "color-contrast",
+    ),
+  };
 }
 
 function report(violations: AxeViolation[]) {
@@ -255,6 +286,36 @@ const CASES: Array<[string, string, (page: Page) => Promise<void>]> = [
       await page.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 30_000 });
     },
   ],
+  /*
+   * Three surfaces that were never covered, added in Phase 7 because the
+   * texture change moves what sits behind things and "we did not check" is not
+   * a result. The 3D view is included even though it is a canvas: what is
+   * audited there is the WRAPPER -- that it is role="img" and labelled, and
+   * that the escape to a keyboard-operable view is reachable -- which is
+   * exactly ADR-032's claim and was previously only asserted in the 3D spec.
+   */
+  [
+    "home",
+    "/",
+    async (page) => {
+      await page.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 30_000 });
+    },
+  ],
+  [
+    "styleguide",
+    "/styleguide",
+    async (page) => {
+      await page.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 30_000 });
+    },
+  ],
+  [
+    "floor plan, 3D",
+    "/floor?mode=3d",
+    async (page) => {
+      await page.locator('[data-floor-3d="ready"]').waitFor({ timeout: 180_000 });
+      await page.waitForTimeout(2000);
+    },
+  ],
 ];
 
 for (const [name, path, prepare] of CASES) {
@@ -271,15 +332,26 @@ for (const [name, path, prepare] of CASES) {
     await page.getByLabel("Sign in as a different person (demo)").waitFor();
     await prepare(page);
 
-    const violations = await audit(page);
+    const { violations, incompleteContrast } = await audit(page);
     const blocking = violations.filter(
       (v) => v.impact === "critical" || v.impact === "serious",
     );
     const minor = violations.filter((v) => !blocking.includes(v));
+    const undecidable = incompleteContrast.reduce((n, r) => n + r.nodes.length, 0);
+
+    // NUMBERS, not pass/fail. Zero blocking violations means little on its own
+    // if axe silently could not judge forty elements -- and after Phase 7 put
+    // the architect's drawing behind the plan in its own colours, the elements
+    // over the plan are exactly the ones it declines to judge.
+    console.log(
+      `  AXE ${name.padEnd(32)} crit+serious ${blocking.length}` +
+        ` | mod+minor ${minor.length}` +
+        ` | contrast-undecidable ${undecidable}`,
+    );
     if (minor.length > 0) {
-      console.log(`\n  ${name} — non-blocking:\n${report(minor)}`);
+      console.log(`  ${name} - non-blocking:` + NL + report(minor));
     }
-    expect(blocking, `\n${report(blocking)}\n`).toEqual([]);
+    expect(blocking, NL + report(blocking) + NL).toEqual([]);
   });
 }
 

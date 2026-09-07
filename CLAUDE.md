@@ -379,6 +379,14 @@ Separate on purpose: the suites mutate demo data deliberately, so sharing one
 would mean a local test run changing what a partner is looking at on
 https://cbva-workspace.vercel.app.
 
+**`next start` does NOT default to `.env.local` — it reads
+`.env.production.local`.** Next loads that file at higher priority in
+production, so `npm run build && npm start` plus `PLAYWRIGHT_BASE_URL` points
+the whole e2e suite at the DEPLOYED database, and passes while doing it. Use
+**`npm run start:local`** to exercise a production build locally; it forces the
+local connection strings into the child environment and refuses any other host.
+`npm start` is left alone because it is what Vercel runs.
+
 **Every database script defaults to `.env.local`.** Production is a different
 VERB, never a different variable — `scripts/prod.mjs` prints the host it is
 about to touch, refuses without `--yes-production`, and refuses outright if the

@@ -199,6 +199,52 @@ they contain partial indexes and CHECK constraints drizzle cannot express.
 
 ---
 
+## `next start` READS `.env.production.local`. Run `npm run start:local` instead.
+
+**This is the sharpest trap in the repository and it bit during Phase 7.**
+
+`next start` sets `NODE_ENV=production`, and Next.js loads `.env.production.local`
+at **higher priority than `.env.local`** in production. So the obvious way to
+exercise a production build locally:
+
+```bash
+npm run build && npm start
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:8081 npm run e2e     # ← DO NOT
+```
+
+silently points the entire suite at the **deployed database**. `PHASE-6-HANDOFF`
+recommends exactly this, because `next dev` restarts itself on Next's memory
+threshold mid-suite and looks like flakiness. It is right about the flakiness and
+wrong about the target.
+
+It fails in the worst way available: **everything passes.** The app is fine and
+the data is a copy of the same seed, so there is no error and no failing test.
+The only consequence is that the e2e suite — which books, cancels, advances the
+demo clock and drives a real auto-release, deliberately — does all of that to the
+database a partner is looking at.
+
+What it actually did: production came back with **65 of 95 bookable desks
+auto-released** on the demo's default date and five extra bookings. `prod:seed`
+repaired it in one command, and `prod:check` had said *"looks presentable"*
+throughout — correctly, because the counts were all fine. The damage was to the
+DISTRIBUTION of bookings, which no count threshold can see.
+
+**So:**
+
+```bash
+npm run build
+npm run start:local -- -p 8093                 # forces .env.local, refuses anything else
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:8093 npm run e2e
+```
+
+`scripts/start-local.mjs` resolves the connection strings from `.env.local`
+itself and puts them in the child's environment, where they outrank every `.env`
+file Next reads — then refuses outright if the resolved host is not the local
+one. `npm start` is left alone: it is what Vercel runs, and it should keep
+reading production config.
+
+---
+
 ## Things that will bite you
 
 **`NEXT_PUBLIC_APP_URL` must be set on Vercel.** It defaults to
