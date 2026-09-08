@@ -69,18 +69,58 @@ async function touchTap(cdp: CDPSession, x: number, y: number) {
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }
 
+/**
+ * An available seat whose bounding-box centre a tap can actually land on.
+ *
+ * At fit-to-floor on a 390px phone the 141 seat markers are documented (top
+ * of file) to nearly tile the surface — the ~11px pitch is tighter than the
+ * ~13px marker, so adjacent hit-areas genuinely overlap by a couple of
+ * pixels. `.first()`'s bounding-box centre can therefore sit on the wrong
+ * side of that overlap, and a real trusted tap there lands on the
+ * NEIGHBOURING seat instead — sometimes a `reserved_fixed` one, which
+ * correctly opens nothing. That is real geometry, not a bug: confirm with
+ * `elementFromPoint`, the same resolution a mouse click would use, rather
+ * than trusting the box blind.
+ */
+async function findTappableSeat(
+  page: Page,
+): Promise<{ seatCode: string; x: number; y: number }> {
+  const codes = await page
+    .locator("[data-seat][data-status='available']")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-seat")!));
+  for (const code of codes) {
+    const candidate = page.locator(`[data-seat="${code}"]`);
+    // `elementFromPoint` only hit-tests the current viewport — most of these
+    // 141 seats start scrolled out of it, and a box for an off-screen seat
+    // hit-tests as nothing, not as itself.
+    await candidate.scrollIntoViewIfNeeded();
+    const box = await candidate.boundingBox();
+    if (!box) continue;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const hit = await page.evaluate(
+      ([hx, hy]) =>
+        document.elementFromPoint(hx, hy)?.closest("[data-seat]")?.getAttribute("data-seat") ??
+        null,
+      [x, y] as const,
+    );
+    if (hit === code) return { seatCode: code, x, y };
+  }
+  throw new Error("no available seat's centre point resolved back to itself");
+}
+
 test.describe("touch on the plan, at 390px", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test("a tap on a seat opens the booking dialog", async ({ page, context }) => {
     await openFloor(page);
     const cdp = await context.newCDPSession(page);
-    const seat = page.locator("[data-seat][data-status='available']").first();
-    await seat.scrollIntoViewIfNeeded();
-    const box = (await seat.boundingBox())!;
+    const { seatCode, x, y } = await findTappableSeat(page);
 
-    await touchTap(cdp, box.x + box.width / 2, box.y + box.height / 2);
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await touchTap(cdp, x, y);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(seatCode);
   });
 
   test("a horizontal drag starting ON a seat pans the plan, not the dialog", async ({
@@ -124,16 +164,14 @@ test.describe("touch on the plan, at 390px", () => {
   test("a small movement stays a tap, not a pan (the slop radius)", async ({ page, context }) => {
     await openFloor(page);
     const cdp = await context.newCDPSession(page);
-    const seat = page.locator("[data-seat][data-status='available']").first();
-    await seat.scrollIntoViewIfNeeded();
-    const box = (await seat.boundingBox())!;
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
+    const { seatCode, x: cx, y: cy } = await findTappableSeat(page);
 
     // Two pixels of jitter is well inside DRAG_SLOP_PX (8) — a real finger
     // is never perfectly still, and that must still register as a tap.
     await touchDrag(cdp, cx, cy, cx + 2, cy - 1, 2);
-    await expect(page.getByRole("dialog")).toBeVisible();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(seatCode);
   });
 
   test("the page still scrolls vertically from a touch that starts above the plan", async ({
