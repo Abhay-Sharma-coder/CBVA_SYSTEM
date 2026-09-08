@@ -182,8 +182,12 @@ test.describe("the 3D floor plan", () => {
 
     const s = await stats(page);
     // Phase 4 measured 11 calls and ~40k triangles with no furniture layer.
-    // Four instanced kinds put it at 15, a long way inside the budget of 60.
-    expect(s.calls).toBeGreaterThanOrEqual(13);
+    // Four instanced kinds put it at 15. Phase 8 / A1 made the bay-density
+    // plate one of two independent, off-by-default toggles rather than an
+    // always-on draw at bay LOD, so the floor this test lands on (whole-floor,
+    // default toggle state) is 12 rather than the old default-on 13 — still a
+    // long way inside the budget of 60.
+    expect(s.calls).toBeGreaterThanOrEqual(12);
     expect(s.calls).toBeLessThan(60);
     expect(s.triangles).toBeGreaterThan(40_000);
     expect(s.triangles).toBeLessThan(120_000);

@@ -60,16 +60,60 @@ test.afterAll(async ({ request }) => {
   await resetClock(request);
 });
 
-/** Opens the floor plan on the first bookable day, in the morning slot. */
-async function openFloor(page: Page): Promise<void> {
+/**
+ * Opens the floor plan, in the (default) morning slot.
+ *
+ * `dayIndex`, used at both places in this file that book a fresh desk (steps
+ * 1 and 6): with no query string `/floor` defaults to today's AM slot, and
+ * this suite runs in real wall-clock time. Late in the day, today's morning
+ * slot has "already finished" and `createBooking()` correctly refuses it
+ * (A21) — the walkthrough would fail on its own correct behaviour depending
+ * what time it happens to run. `tests/integration/series-and-bounds.test.ts`
+ * hit the identical flake; same fix here: don't book today.
+ *
+ * It turns out BOTH booking steps need this, not just the first — step 4's
+ * `resetClock` (checking in) puts the demo clock back to real time before
+ * step 6 runs, so step 6 is just as exposed to "today's slot already
+ * finished" as step 1 was, and originally failed on exactly that once step 1
+ * was fixed and could actually be reached.
+ *
+ * The two calls deliberately use DIFFERENT indices (1 and 2) rather than both
+ * defaulting to "tomorrow": the first attempt at this fix sent both to the
+ * same day, and the seed's own booking history for that specific date
+ * collided with whichever colleague step 6 happened to search up first ("There
+ * is already a desk booked for that slot"). Distinct days sidesteps that
+ * without having to know or control which colleague gets picked.
+ */
+async function openFloor(page: Page, { dayIndex = 0 } = {}): Promise<void> {
   await page.goto("/floor");
   await settled(page);
+  await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
+
+  if (dayIndex === 0) return;
+
+  const days = page.getByRole("radiogroup", { name: "Booking date" }).getByRole("radio");
+  // `placeholderData: (previous) => previous` (floor-client.tsx) means the
+  // date click does not blank the plan — it keeps showing TODAY's seats,
+  // fully interactive, until the new date's fetch resolves. Waiting only for
+  // "[data-seat] exists" is satisfied instantly by that stale render, so a
+  // seat grabbed right after the click can be today's, not the chosen day's —
+  // wait for the actual response instead.
+  const refetch = page.waitForResponse(
+    (r) => r.url().includes("/api/floor?date=") && r.status() === 200,
+  );
+  await days.nth(dayIndex).click();
+  await refetch;
   await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
 }
 
 test("1 — an assistant manager books a desk from the floor plan", async ({ page }) => {
+  // openFloor's date-picker round trip (real navigation, a click, and a
+  // waited network response, on top of everything this step already did)
+  // pushed observed runs to right up against the 60s default — comfortably
+  // under it most of the time, but not with margin to spare.
+  test.setTimeout(90_000);
   await signInAs(page, booker);
-  await openFloor(page);
+  await openFloor(page, { dayIndex: 1 });
 
   const seat = page.locator("[data-seat][data-status='available']").first();
   seatCode = (await seat.getAttribute("data-seat")) ?? "";
@@ -177,7 +221,7 @@ test("5 — the printable QR sheet exists and is scannable markup", async ({ pag
 test("6 — a manager books on behalf of a colleague", async ({ page, request }) => {
   const manager = await personaOfGrade(request, "manager");
   await signInAs(page, manager.email);
-  await openFloor(page);
+  await openFloor(page, { dayIndex: 2 });
 
   const seat = page.locator("[data-seat][data-status='available']").first();
   const onBehalfSeat = await seat.getAttribute("data-seat");
@@ -229,6 +273,12 @@ test("8 — cancelling a booking releases the desk", async ({ page }) => {
 });
 
 test("9 — advancing the clock auto-releases an un-checked-in desk", async ({ page }) => {
+  // Two `runJobs` calls (each a real scan over real rows) and three full
+  // reloads-with-networkidle plus their screenshots, against the real Neon
+  // connection. The 60s default is comfortable for the rest of this file's
+  // steps but not for this one — it timed out mid-run rather than failing on
+  // any assertion, which is a budget problem, not a behaviour bug.
+  test.setTimeout(120_000);
   await signInAs(page, admin);
   await page.goto("/floor");
   await settled(page);

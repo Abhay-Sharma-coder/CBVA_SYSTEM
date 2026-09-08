@@ -64,7 +64,13 @@ test("switching slots does not stack up history entries", async ({ page }) => {
   // replace, not push: Back should leave the floor plan, not walk through
   // every slot the user glanced at.
   await page.goto("/");
-  await page.getByRole("link", { name: "Floor Map" }).click();
+  // Scoped to the header nav: the signed-in home page's own quick-link grid
+  // (Phase 8) added a second "Floor Map" link on the page, and an unscoped
+  // role query is ambiguous the moment there are two.
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("link", { name: "Floor Map" })
+    .click();
   await page.locator("[data-seat]").first().waitFor({ timeout: 30_000 });
 
   await page.getByRole("radio", { name: /Afternoon/ }).click();
