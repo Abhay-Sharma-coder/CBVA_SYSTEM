@@ -1,0 +1,341 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   CBVA Workspace — design tokens.
+
+   THIS BLOCK IS THE WHOLE PALETTE. Swap the eight raw values below and the
+   entire product re-skins. Nothing else in the codebase hard-codes a colour.
+
+   The brief's constraints, restated because they are easy to erode:
+     · gold is an ACCENT ONLY — a focused seat, an active tab underline, one key
+       metric. Never a fill, never a primary button. Target under 5% of pixels.
+     · border radius maxes out at 4px.
+     · borders are 1px hairlines.
+     · no gradients, no glassmorphism, no shadow heavier than a 1px hairline.
+   This is a chartered accountancy firm, not consumer SaaS.
+   ========================================================================== */
+
+:root {
+  /* ---- raw palette, from the CBVA logo and letterhead ---- */
+  --cbva-navy: #1e2a5a;
+  --cbva-gold: #d9a34a;
+  --cbva-paper: #fbfaf7;
+  --cbva-ink: #14181f;
+  --cbva-hairline: #e4e0d9;
+
+  /* ---- derived neutrals, all mixed from the five above ---- */
+  --cbva-navy-tint: color-mix(in srgb, var(--cbva-navy) 8%, var(--cbva-paper));
+  --cbva-navy-tint-strong: color-mix(in srgb, var(--cbva-navy) 14%, var(--cbva-paper));
+  /* your_booking's fill ONLY (Phase 8 / B1) — deliberately its own token, not
+     a redefinition of navy-tint-strong above, which also colours ::selection
+     (line ~232) and would turn ordinary text-selection dark-on-dark if pushed
+     this far. Measured directly against the baked plan texture at all 141
+     seats, composited at the 55% opacity the plan actually renders
+     (tests/unit/texture-contrast.test.ts's own method): navy-tint-strong's
+     14% mix read 1.29:1 as a graphical object, under WCAG 1.4.11's 3:1. The
+     relationship is NOT linear — 30–50% measured WORSE (1.03–1.17:1) than 14%
+     before climbing, because at those greys the fill's luminance passes
+     through whatever the drawing's own midtones happen to be at some desk on
+     the floor. 95% is the value that clears 3:1 with real margin (3.29:1,
+     worst case D8-04) while staying visibly one step short of full navy —
+     100% measures 3.77:1, matching --seat-checkedin-fill's own baseline
+     (3.83), which would make "your unconfirmed booking" and "checked in"
+     read as the same weight of navy with only the border differing. */
+  --cbva-navy-yours: color-mix(in srgb, var(--cbva-navy) 95%, var(--cbva-paper));
+  --cbva-ink-muted: color-mix(in srgb, var(--cbva-ink) 72%, var(--cbva-paper));
+  /* 62% puts tertiary text at 4.90:1 on paper. It was 58% and measured
+     4.30:1 — under AA, despite the comment here claiming otherwise. An axe
+     run over the Phase 2 floor plan caught it; these carry real information
+     (timestamps, seat counts, the drawing provenance), not decoration. */
+  --cbva-ink-subtle: color-mix(in srgb, var(--cbva-ink) 62%, var(--cbva-paper));
+  --cbva-surface: #ffffff;
+  --cbva-surface-sunken: color-mix(in srgb, var(--cbva-hairline) 32%, var(--cbva-paper));
+
+  /* ---- semantic status, kept desaturated so gold stays the loudest thing ---- */
+  --cbva-positive: #2f6b4f;
+  --cbva-caution: #8a6414;
+  --cbva-danger: #8f2f2a;
+
+  /* Status tints, baked OPAQUE against paper.
+     These were `bg-caution/8` and friends, which is a translucent fill — so the
+     contrast of the text on top depended on whatever happened to be behind the
+     badge. On a plain row that is fine; on a SELECTED row (bg-navy-tint) a
+     "queued" badge measured 3.99:1, under AA. A badge has to carry its own
+     background, or its contrast is a property of its surroundings.
+     Composited here: caution 4.63:1, positive 5.41:1, danger 6.79:1. */
+  --cbva-tint-positive: color-mix(in srgb, var(--cbva-positive) 8%, var(--cbva-paper));
+  --cbva-tint-caution: color-mix(in srgb, var(--cbva-caution) 8%, var(--cbva-paper));
+  --cbva-tint-danger: color-mix(in srgb, var(--cbva-danger) 8%, var(--cbva-paper));
+
+  /* ---- seat status. Colour is the SECONDARY cue everywhere; the primary cue
+         is the border treatment + glyph carried by SeatSwatch. ---- */
+  --seat-available-fill: var(--cbva-paper);
+  --seat-available-line: var(--cbva-navy);
+  --seat-booked-fill: var(--cbva-navy-tint);
+  --seat-booked-line: var(--cbva-navy);
+  --seat-yours-fill: var(--cbva-navy-yours);
+  --seat-yours-line: var(--cbva-gold);
+  --seat-fixed-fill: var(--cbva-surface-sunken);
+  --seat-fixed-line: var(--cbva-ink-subtle);
+  --seat-checkedin-fill: var(--cbva-navy);
+  --seat-checkedin-line: var(--cbva-navy);
+  --seat-released-fill: var(--cbva-paper);
+  --seat-released-line: var(--cbva-caution);
+  --seat-blocked-fill: var(--cbva-surface-sunken);
+  --seat-blocked-line: var(--cbva-ink);
+
+  /* ---- charts ----
+     Phase 5. The brand palette is deliberately dark and desaturated, which is
+     right for a professional-services interface and WRONG as a categorical
+     chart palette: run the four brand colours through a CVD check and navy and
+     the green fail the chroma floor, and amber/green sit at ΔE 12.8 for normal
+     vision — two series a full-colour reader cannot reliably tell apart.
+
+     So charts get their own steps, in the same hue families, chosen by
+     measurement rather than by eye. This exact order passes all six checks
+     against --paper: lightness band, chroma floor, CVD separation (worst
+     adjacent pair ΔE 12.0 deutan), normal-vision floor (16.3) and 3:1 contrast.
+     THE ORDER IS PART OF THE RESULT — the checks are on ADJACENT pairs, and
+     reordering these four reintroduces a failure. Assign them in sequence and
+     never cycle: a ninth series folds into "Other" or becomes a small multiple.
+
+     Gold is deliberately absent. It is the accent, and a chart is the easiest
+     place in a product to spend 40% of the pixels on it by accident. */
+  --cbva-chart-1: #a86e08;
+  --cbva-chart-2: #3d5bb8;
+  --cbva-chart-3: #4e9e73;
+  --cbva-chart-4: #b03a2e;
+
+  /* Sequential, for magnitude — the bay heat map. ONE hue, light to dark,
+     monotonic in lightness. Never a rainbow: a rainbow ramp implies category
+     boundaries where there is only a continuum, and it is unreadable in
+     greyscale, which is how partners print these. */
+  --cbva-heat-0: var(--cbva-surface-sunken);
+  --cbva-heat-1: color-mix(in srgb, var(--cbva-navy) 12%, var(--cbva-paper));
+  --cbva-heat-2: color-mix(in srgb, var(--cbva-navy) 28%, var(--cbva-paper));
+  --cbva-heat-3: color-mix(in srgb, var(--cbva-navy) 48%, var(--cbva-paper));
+  --cbva-heat-4: color-mix(in srgb, var(--cbva-navy) 70%, var(--cbva-paper));
+  --cbva-heat-5: var(--cbva-navy);
+
+  /* Recessive chart furniture. Grid lines must never compete with the data. */
+  --cbva-grid: color-mix(in srgb, var(--cbva-hairline) 70%, var(--cbva-paper));
+
+  /* ---- geometry ---- */
+  --cbva-radius: 4px;
+  --cbva-radius-sm: 2px;
+  --cbva-hairline-width: 1px;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-navy: var(--cbva-navy);
+  --color-gold: var(--cbva-gold);
+  --color-paper: var(--cbva-paper);
+  --color-ink: var(--cbva-ink);
+  --color-hairline: var(--cbva-hairline);
+
+  --color-navy-tint: var(--cbva-navy-tint);
+  --color-navy-tint-strong: var(--cbva-navy-tint-strong);
+  --color-navy-yours: var(--cbva-navy-yours);
+  --color-ink-muted: var(--cbva-ink-muted);
+  --color-ink-subtle: var(--cbva-ink-subtle);
+  --color-surface: var(--cbva-surface);
+  --color-surface-sunken: var(--cbva-surface-sunken);
+
+  --color-positive: var(--cbva-positive);
+  --color-caution: var(--cbva-caution);
+  --color-danger: var(--cbva-danger);
+  --color-tint-positive: var(--cbva-tint-positive);
+  --color-tint-caution: var(--cbva-tint-caution);
+  --color-tint-danger: var(--cbva-tint-danger);
+
+  --color-chart-1: var(--cbva-chart-1);
+  --color-chart-2: var(--cbva-chart-2);
+  --color-chart-3: var(--cbva-chart-3);
+  --color-chart-4: var(--cbva-chart-4);
+  --color-grid: var(--cbva-grid);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Radius stops at 4px. There is deliberately no --radius-lg. */
+  --radius-sm: var(--cbva-radius-sm);
+  --radius-md: var(--cbva-radius);
+  --radius-lg: var(--cbva-radius);
+  --radius-xl: var(--cbva-radius);
+
+  /* The only two shadows in the system. Both are hairlines, not drop shadows. */
+  --shadow-hairline: 0 1px 0 0 var(--cbva-hairline);
+  --shadow-hairline-inset: inset 0 -1px 0 0 var(--cbva-hairline);
+}
+
+@layer base {
+  * {
+    border-color: var(--cbva-hairline);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    /*
+     * Stops a wide child expanding the LAYOUT VIEWPORT on a phone.
+     *
+     * The room grid (13 hour columns) and the audit log both sit inside their
+     * own `overflow-x: auto` scroller and neither makes the page scroll
+     * sideways — but Chrome on mobile still widens the layout viewport to the
+     * widest content it finds, so /rooms rendered at 733 CSS px on a 393 px
+     * device: no overflow, everything just silently half-size and unreadable.
+     *
+     * `clip` rather than `hidden` on purpose. `hidden` makes body a scroll
+     * container, which breaks `position: sticky` on any ancestor path through
+     * it — and the room grid's first column and the app header are both sticky.
+     */
+    overflow-x: clip;
+    background-color: var(--cbva-paper);
+    color: var(--cbva-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Page titles only. The serif echoes the engraved wordmark; using it for
+     anything else immediately makes the product look like a wedding invitation. */
+  h1,
+  h2,
+  .font-title {
+    font-family: var(--font-serif);
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: balance;
+  }
+
+  /* Seat codes, bay labels and plan annotations. Nothing else. */
+  .seat-code {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  /* Number columns must line up — this is a firm that reads tables for a living. */
+  .tabular,
+  td.numeric,
+  th.numeric {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cbva-navy);
+    outline-offset: 2px;
+    border-radius: var(--cbva-radius-sm);
+  }
+
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+
+  ::selection {
+    background-color: var(--cbva-navy-tint-strong);
+  }
+}
+
+@layer utilities {
+  /* Blocked seats: a hatch, so the status survives greyscale printing and
+     colour-vision deficiency without relying on hue. */
+  .hatch {
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--cbva-ink-subtle) 0 1px,
+      transparent 1px 5px
+    );
+  }
+
+  .hairline-b {
+    box-shadow: var(--shadow-hairline);
+  }
+
+  /*
+   * Long admin tables — the seat inventory and the staff roster are both 141
+   * rows, and the audit log pages at 50.
+   *
+   * `content-visibility: auto` lets the browser skip layout and paint for rows
+   * that are off screen, which is the cheap end of the virtualisation advice
+   * and costs nothing at the call site. Real windowing would mean a dependency
+   * and losing native table semantics — including the row/column relationships
+   * a screen reader uses — which is a poor trade for 141 rows.
+   *
+   * `contain-intrinsic-size` is the reserved height, so the scrollbar does not
+   * jump as rows are realised. 44px is the measured row height.
+   */
+  .rows-lazy > tbody > tr {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------- print ---
+ *
+ * The desk QR sheet is the one page in this product whose real output is paper:
+ * 141 stickers that go on 141 desks. So it gets real print rules rather than
+ * whatever the browser decides — a fixed grid so a sticker is never split
+ * across a page break, no app chrome, and hairlines that survive at 300dpi.
+ */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  header[data-app-header],
+  footer[data-app-footer],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .qr-sheet {
+    display: grid !important;
+    /* 3 across, 4 down = 12 to an A4 page. */
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6mm !important;
+  }
+
+  .qr-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    /* A hairline at screen weight disappears on paper. */
+    border: 0.4mm solid #999 !important;
+    padding: 4mm 2mm !important;
+  }
+
+  .qr-card svg {
+    /* Big enough that a phone camera finds it from arm's length. */
+    width: 32mm !important;
+    height: 32mm !important;
+  }
+}
